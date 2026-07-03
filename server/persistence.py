@@ -48,6 +48,40 @@ CREATE TABLE IF NOT EXISTS binding_events (
     at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_binding_events_session ON binding_events(session_id);
+
+CREATE TABLE IF NOT EXISTS rounds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES sessions(id),
+    idx INTEGER NOT NULL,
+    question_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    opened_at REAL,
+    closed_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_rounds_session ON rounds(session_id);
+
+CREATE TABLE IF NOT EXISTS answers (
+    round_id INTEGER NOT NULL REFERENCES rounds(id),
+    session_id INTEGER NOT NULL REFERENCES sessions(id),
+    player_id TEXT NOT NULL,
+    zone_id TEXT,
+    resolved TEXT NOT NULL,
+    position_x REAL,
+    position_y REAL,
+    at REAL NOT NULL,
+    PRIMARY KEY (round_id, player_id)
+);
+
+CREATE TABLE IF NOT EXISTS score_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES sessions(id),
+    player_id TEXT NOT NULL,
+    round_id INTEGER REFERENCES rounds(id),
+    points INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_score_events_session ON score_events(session_id);
 """
 
 
@@ -72,6 +106,40 @@ class BindingEventRow:
     new_gid: Optional[int]
     reason: str
     actor: Optional[str]
+    at: float
+
+
+@dataclass(slots=True)
+class RoundRow:
+    id: int
+    session_id: int
+    idx: int
+    question_id: str
+    state: str
+    opened_at: Optional[float]
+    closed_at: Optional[float]
+
+
+@dataclass(slots=True)
+class AnswerRow:
+    round_id: int
+    session_id: int
+    player_id: str
+    zone_id: Optional[str]
+    resolved: str
+    position_x: Optional[float]
+    position_y: Optional[float]
+    at: float
+
+
+@dataclass(slots=True)
+class ScoreEventRow:
+    id: int
+    session_id: int
+    player_id: str
+    round_id: Optional[int]
+    points: int
+    reason: str
     at: float
 
 
@@ -171,3 +239,93 @@ class Database:
                 (session_id,),
             ).fetchall()
             return [BindingEventRow(**dict(row)) for row in rows]
+
+    # ------------------------------------------------------------------ #
+    # Rounds
+    # ------------------------------------------------------------------ #
+    def create_round(self, session_id: int, idx: int, question_id: str) -> int:
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO rounds (session_id, idx, question_id, state, opened_at, closed_at) "
+                "VALUES (?, ?, ?, 'pending', NULL, NULL)",
+                (session_id, idx, question_id),
+            )
+            self._conn.commit()
+            return cur.lastrowid
+
+    def update_round_state(
+        self,
+        round_id: int,
+        state: str,
+        opened_at: Optional[float],
+        closed_at: Optional[float],
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE rounds SET state = ?, opened_at = ?, closed_at = ? WHERE id = ?",
+                (state, opened_at, closed_at, round_id),
+            )
+            self._conn.commit()
+
+    def load_rounds(self, session_id: int) -> list[RoundRow]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, session_id, idx, question_id, state, opened_at, closed_at "
+                "FROM rounds WHERE session_id = ? ORDER BY idx",
+                (session_id,),
+            ).fetchall()
+            return [RoundRow(**dict(row)) for row in rows]
+
+    # ------------------------------------------------------------------ #
+    # Answers
+    # ------------------------------------------------------------------ #
+    def record_answer(self, row: AnswerRow) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO answers
+                    (round_id, session_id, player_id, zone_id, resolved, position_x, position_y, at)
+                VALUES
+                    (:round_id, :session_id, :player_id, :zone_id, :resolved, :position_x, :position_y, :at)
+                ON CONFLICT(round_id, player_id) DO UPDATE SET
+                    zone_id=excluded.zone_id,
+                    resolved=excluded.resolved,
+                    position_x=excluded.position_x,
+                    position_y=excluded.position_y,
+                    at=excluded.at
+                """,
+                asdict(row),
+            )
+            self._conn.commit()
+
+    def load_answers(self, round_id: int) -> list[AnswerRow]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT round_id, session_id, player_id, zone_id, resolved, position_x, position_y, at "
+                "FROM answers WHERE round_id = ?",
+                (round_id,),
+            ).fetchall()
+            return [AnswerRow(**dict(row)) for row in rows]
+
+    # ------------------------------------------------------------------ #
+    # Score events (scores are always SUM(points), never a mutable counter)
+    # ------------------------------------------------------------------ #
+    def record_score_event(
+        self, session_id: int, player_id: str, round_id: Optional[int], points: int, reason: str
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO score_events (session_id, player_id, round_id, points, reason, at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, player_id, round_id, points, reason, time.time()),
+            )
+            self._conn.commit()
+
+    def sum_scores(self, session_id: int) -> dict[str, int]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT player_id, SUM(points) AS total FROM score_events "
+                "WHERE session_id = ? GROUP BY player_id",
+                (session_id,),
+            ).fetchall()
+            return {row["player_id"]: row["total"] for row in rows}

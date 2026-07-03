@@ -30,9 +30,24 @@
     .state.lost { color: #f87171; }
     .state.unclaimed { color: #fbbf24; }
     .error { color: #f87171; min-height: 1.4em; }
+    .score-badge {
+      position: fixed; top: 1rem; right: 1rem; background: #16161f; border: 1px solid #333;
+      border-radius: 0.5rem; padding: 0.4em 0.8em; font-weight: 700; display: none;
+    }
+    .round-panel { max-width: 32rem; }
+    .question { font-size: 1.6rem; font-weight: 700; }
+    .options { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; }
+    .option { border: 1px solid #333; border-radius: 0.5rem; padding: 0.6em 1em; font-size: 1.1rem; }
+    .option.winner { border-color: #4ade80; color: #4ade80; }
+    .countdown { font-size: 1rem; opacity: 0.6; margin-top: 0.5rem; }
+    .phase-note { opacity: 0.7; margin-top: 0.5rem; }
+    .result { font-size: 1.3rem; font-weight: 700; margin-top: 1rem; }
+    .result.win { color: #4ade80; }
+    .result.lose { color: #f87171; }
   </style>
 </head>
 <body>
+  <div class="score-badge" id="score-badge">0 pts</div>
   <h1>Enter the number on your dot</h1>
   <div class="player-id" id="player-id"></div>
   <div class="state lost" id="lost-banner" style="display:none">Lost — type your new number, or wait for an usher</div>
@@ -44,6 +59,7 @@
   <div id="status" style="display:none">
     <div>You are <strong id="gid-display"></strong></div>
     <div class="state" id="state-display"></div>
+    <div class="round-panel" id="round-panel"></div>
   </div>
 
   <script>
@@ -82,6 +98,8 @@
       }
     }
 
+    let wasBound = false;
+
     function render(player) {
       const lostBanner = document.getElementById("lost-banner");
       if (player.state === "bound") {
@@ -92,6 +110,8 @@
         const stateEl = document.getElementById("state-display");
         stateEl.textContent = "Connected";
         stateEl.className = "state bound";
+        if (!wasBound) connectGameWs();
+        wasBound = true;
       } else if (player.state === "lost") {
         // Backend allows self-service re-claim from "lost", so keep the
         // form visible — most players just need to retype their new number.
@@ -112,6 +132,86 @@
       } catch (err) {
         // network hiccup: keep last known UI, try again next tick
       }
+    }
+
+    // ---- round panel (driven by /ws/player/{id}) ----
+    const roundPanel = document.getElementById("round-panel");
+    const scoreBadge = document.getElementById("score-badge");
+    let countdownTimer = null;
+
+    function setScore(points) {
+      scoreBadge.textContent = `${points} pts`;
+      scoreBadge.style.display = "block";
+    }
+
+    function renderRound(round) {
+      clearInterval(countdownTimer);
+      if (!round) {
+        roundPanel.innerHTML = `<div class="phase-note">Waiting for the next round…</div>`;
+        return;
+      }
+      const optionsHtml = round.options
+        .map((o) => `<div class="option" data-zone="${o.zone}">${o.label}</div>`)
+        .join("");
+      roundPanel.innerHTML = `
+        <div class="question">${round.question}</div>
+        <div class="options">${optionsHtml}</div>
+        <div class="countdown" id="countdown"></div>
+      `;
+      if (round.state === "active" && round.opened_at) {
+        const endsAt = (round.opened_at + round.duration_s) * 1000;
+        const tick = () => {
+          const secs = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+          const el = document.getElementById("countdown");
+          if (el) el.textContent = secs > 0 ? `${secs}s — move to your answer` : "Time's up!";
+        };
+        tick();
+        countdownTimer = setInterval(tick, 250);
+      } else if (round.state === "closing") {
+        const el = document.getElementById("countdown");
+        if (el) el.textContent = "Locking in answers…";
+      }
+    }
+
+    function renderReveal(round, yourAnswer) {
+      const winners = new Set(round.winning_zones || []);
+      const optionsHtml = round.options
+        .map((o) => {
+          const cls = winners.has(o.zone) ? "option winner" : "option";
+          const count = (round.tally && round.tally[o.zone]) || 0;
+          return `<div class="${cls}" data-zone="${o.zone}">${o.label} — ${count}</div>`;
+        })
+        .join("");
+      const won = yourAnswer && yourAnswer.zone && winners.has(yourAnswer.zone);
+      const resultText = !yourAnswer || yourAnswer.resolved === "absent"
+        ? "You didn't answer this one"
+        : won
+          ? "You scored!"
+          : "Not this time";
+      roundPanel.innerHTML = `
+        <div class="question">${round.question}</div>
+        <div class="options">${optionsHtml}</div>
+        <div class="result ${won ? "win" : "lose"}">${resultText}</div>
+      `;
+    }
+
+    function connectGameWs() {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${proto}://${location.host}/ws/player/${encodeURIComponent(playerId)}`);
+      ws.onmessage = (evt) => {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === "hello") {
+          renderRound(msg.round);
+          if (msg.scores && msg.scores[playerId] !== undefined) setScore(msg.scores[playerId]);
+        } else if (msg.type === "round_opened" || msg.type === "round_closing" || msg.type === "answers_locked") {
+          renderRound(msg);
+        } else if (msg.type === "reveal") {
+          renderReveal(msg, msg.your_answer);
+        } else if (msg.type === "scores_updated") {
+          setScore(msg.your_score || 0);
+        }
+      };
+      ws.onclose = () => setTimeout(() => { if (wasBound) connectGameWs(); }, 1500);
     }
 
     submitBtn.addEventListener("click", claim);

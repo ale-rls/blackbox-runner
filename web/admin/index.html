@@ -26,19 +26,42 @@
     .state.left { background: #222; color: #999; }
     input.rebind-gid { width: 5em; background: #16161f; border: 1px solid #444; color: inherit; padding: 0.2em 0.4em; border-radius: 0.3em; }
     button { background: #5b6bf6; color: white; border: none; padding: 0.3em 0.8em; border-radius: 0.3em; cursor: pointer; }
+    button:disabled { opacity: 0.4; cursor: default; }
     .empty { opacity: 0.5; padding: 2rem 0; text-align: center; }
+    section { margin-bottom: 2rem; }
+    .round-status { font-size: 0.95rem; opacity: 0.85; margin: 0.5rem 0; }
+    .round-controls { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .scoreboard { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .score-chip { background: #16161f; border: 1px solid #333; border-radius: 0.4rem; padding: 0.3em 0.7em; font-size: 0.9rem; }
   </style>
 </head>
 <body>
-  <h1>Binding board</h1>
-  <div class="conn down" id="conn">connecting…</div>
-  <table>
-    <thead>
-      <tr><th>Player</th><th>GID</th><th>State</th><th>Last seen</th><th>Rebind</th></tr>
-    </thead>
-    <tbody id="rows"></tbody>
-  </table>
-  <div class="empty" id="empty" style="display:none">No players yet.</div>
+  <section>
+    <h1>Round control</h1>
+    <div class="round-controls">
+      <button onclick="roundAction('start')">Start next round</button>
+      <button onclick="roundAction('close')">Close</button>
+      <button onclick="roundAction('reveal')">Reveal</button>
+    </div>
+    <div class="round-status" id="round-status">No round loaded.</div>
+  </section>
+
+  <section>
+    <h1>Scoreboard</h1>
+    <div class="scoreboard" id="scoreboard"></div>
+  </section>
+
+  <section>
+    <h1>Binding board</h1>
+    <div class="conn down" id="conn">connecting…</div>
+    <table>
+      <thead>
+        <tr><th>Player</th><th>GID</th><th>State</th><th>Last seen</th><th>Rebind</th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" style="display:none">No players yet.</div>
+  </section>
 
   <script>
     const players = new Map();
@@ -105,8 +128,50 @@
       };
     }
 
+    window.roundAction = async function (action) {
+      const resp = await fetch(`/api/admin/rounds/${action}`, { method: "POST" });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        alert(body.detail || `${action} failed (${resp.status})`);
+      }
+      refreshRound();
+    };
+
+    async function refreshRound() {
+      try {
+        const resp = await fetch("/api/rounds/current");
+        const round = resp.ok ? await resp.json() : null;
+        const el = document.getElementById("round-status");
+        if (!round) {
+          el.textContent = "No round loaded.";
+        } else {
+          el.textContent = `[${round.index}] ${round.question} — ${round.state}`;
+        }
+      } catch (err) {
+        // ignore, try again next tick
+      }
+    }
+
+    async function refreshScores() {
+      try {
+        const resp = await fetch("/api/scores");
+        const scores = resp.ok ? await resp.json() : {};
+        const board = document.getElementById("scoreboard");
+        const entries = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+        board.innerHTML = entries.length
+          ? entries.map(([id, pts]) => `<div class="score-chip">${id}: ${pts}</div>`).join("")
+          : `<div class="empty" style="padding:0.5rem 0">No scores yet.</div>`;
+      } catch (err) {
+        // ignore, try again next tick
+      }
+    }
+
     connect();
+    refreshRound();
+    refreshScores();
     setInterval(render, 1000); // keep "last seen" timers fresh
+    setInterval(refreshRound, 2000);
+    setInterval(refreshScores, 2000);
   </script>
 </body>
 </html>

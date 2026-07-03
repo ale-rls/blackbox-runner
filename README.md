@@ -63,13 +63,32 @@ Requires Python 3.11+ and a running TrackingBox instance (mock backend is
 fine for all development and load testing):
 
 ```bash
-# in a TrackingBox checkout at the pinned commit
+# in a TrackingBox checkout at the pinned commit — bare mock, no zones/floor
 audience-tracker serve --backend mock --port 8000
+
+# or, to exercise zone-based gameplay (answers require floor projection):
+audience-tracker serve --config /path/to/this/repo/dev/trackingbox.config.json --port 8000
 
 # in this repo
 make dev
 ```
 
-`make dev` boots the game server against `ws://localhost:8000/ws`.
+`dev/trackingbox.config.json` enables calibration (an identity mapping, since
+the mock backend has no real camera) and defines `answer_a`/`answer_b` zones
+matching `content/show.yaml`. Without it, `floor_valid` stays false and no
+round can ever be answered — only useful for Phase 0/1-style connectivity
+checks.
+
+`make dev` boots the game server against `ws://localhost:8000/ws`, loading
+`content/show.yaml` (validated against TrackingBox's `/api/zones` at
+startup — a content zone typo fails fast here rather than silently going
+unanswerable mid-show) and the admin dashboard at `/admin/`.
 
 Run tests with `make test`.
+
+Note: TrackingBox's default mock simulator churns GIDs quite aggressively
+(people can disappear and respawn sub-second). That's a good stress test but
+makes manual single-player demos flaky — expect players to bounce into
+`lost` unless you're actively re-claiming. Phase 4's auto-rebind/ritual flow
+is the real fix; for now, favor scripted checks over live clicking when
+verifying binding behavior by hand.

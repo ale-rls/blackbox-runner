@@ -20,6 +20,7 @@ class Settings:
     reconnect_max_s: float = 30.0
     position_history_seconds: float = 5.0
     db_path: str = "data/theater-game.db"
+    content_path: str = "content/show.yaml"
 
     @classmethod
     def load(cls) -> "Settings":
@@ -38,4 +39,5 @@ class Settings:
                 os.environ.get("POSITION_HISTORY_SECONDS", cls.position_history_seconds)
             ),
             db_path=os.environ.get("GAME_DB_PATH", cls.db_path),
+            content_path=os.environ.get("GAME_CONTENT_PATH", cls.content_path),
         )

@@ -1,0 +1,38 @@
+version: "1"
+rounds:
+  - id: r1
+    question: "Coffee or tea?"
+    type: majority
+    duration_s: 20
+    grace_s: 5
+    points: 10
+    options:
+      - zone: answer_a
+        label: "Coffee"
+      - zone: answer_b
+        label: "Tea"
+
+  - id: r2
+    question: "Pick the real one."
+    type: correct_zone
+    duration_s: 20
+    grace_s: 5
+    points: 15
+    options:
+      - zone: answer_a
+        label: "Left"
+        correct: true
+      - zone: answer_b
+        label: "Right"
+
+  - id: r3
+    question: "Pick the road less traveled."
+    type: minority
+    duration_s: 20
+    grace_s: 5
+    points: 20
+    options:
+      - zone: answer_a
+        label: "Well-lit path"
+      - zone: answer_b
+        label: "Dark path"

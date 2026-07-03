@@ -1,0 +1,27 @@
+{
+  "calibration": {
+    "enabled": true,
+    "anchor": "bottom_center",
+    "floor_space": "normalized",
+    "image_points": [[0, 0], [1920, 0], [1920, 1080], [0, 1080]],
+    "floor_points": [[0, 0], [1, 0], [1, 1], [0, 1]],
+    "smoothing_alpha": 0.35
+  },
+  "zones": {
+    "enabled": true,
+    "default_zone": "outside",
+    "zones": [
+      {"id": "answer_a", "label": "Answer A", "rect": [0, 0, 0.5, 1]},
+      {"id": "answer_b", "label": "Answer B", "rect": [0.5, 0, 1, 1]}
+    ]
+  },
+  "pipeline": {
+    "source": "0",
+    "backend": "mock",
+    "mock_people": 24
+  },
+  "api": {
+    "host": "0.0.0.0",
+    "port": 8000
+  }
+}

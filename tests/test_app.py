@@ -78,6 +78,50 @@ async def test_claim_flow_and_admin_rebind(fake_backend, fake_zones_http, tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_round_lifecycle_via_admin_endpoints(fake_backend, fake_zones_http, tmp_path):
+    app = create_app(_settings(fake_backend, fake_zones_http, tmp_path))
+
+    async with LifespanManager(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            # gid 1 -> answer_a per the fake backend's canned snapshot. (gid 2 is
+            # scripted to go invisible shortly after connect, so it's not used
+            # here — majority/minority scoring math is covered by test_engine.py;
+            # this test is only about the admin REST wiring.)
+            assert (await client.post("/api/players/seat-1/claim", json={"gid": 1})).status_code == 200
+
+            resp = await client.get("/api/rounds/current")
+            assert resp.json() is None
+
+            resp = await client.post("/api/admin/rounds/start")
+            assert resp.status_code == 200
+            round_payload = resp.json()
+            assert round_payload["state"] == "active"
+            assert round_payload["index"] == 0
+
+            resp = await client.get("/api/rounds/current")
+            assert resp.json()["state"] == "active"
+
+            resp = await client.post("/api/admin/rounds/close")
+            assert resp.status_code == 200
+            assert resp.json()["state"] == "closing"
+
+            resp = await client.post("/api/admin/rounds/reveal")
+            assert resp.status_code == 200
+            # RoundRuntime.state is "revealed" only transiently in the "reveal"
+            # engine event; by the time reveal_round() returns it's "done".
+            assert resp.json()["state"] == "done"
+
+            resp = await client.get("/api/scores")
+            scores = resp.json()
+            assert scores  # someone scored (r1's answer_a/answer_b split by seat-1/seat-2)
+
+            # Closing again with nothing active is rejected.
+            resp = await client.post("/api/admin/rounds/close")
+            assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_player_page_served(fake_backend, fake_zones_http, tmp_path):
     app = create_app(_settings(fake_backend, fake_zones_http, tmp_path))
 

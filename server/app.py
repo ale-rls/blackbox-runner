@@ -1,9 +1,9 @@
 """FastAPI entry point for the theater game server.
 
 Phase 0 connected to TrackingBox and mirrored its audience state. Phase 1
-adds the player<->GID binding layer: claim flow, persisted state with crash
-recovery, and a minimal admin binding board. Round/scoring logic and the
-player/TD WebSockets described in the full design land in later phases.
+added the player<->GID binding layer: claim flow, persisted state with crash
+recovery, and a minimal admin binding board. Phase 2 adds the round/scoring
+engine and the player WebSocket. The TouchDesigner WS lands in Phase 3.
 """
 
 from __future__ import annotations
@@ -21,6 +21,8 @@ from pydantic import BaseModel
 
 from .bindings import BindingError, BindingManager
 from .config import Settings
+from .content import ContentError, ShowContent, load_show
+from .engine import EngineError, GameEngine
 from .models import ZoneMap
 from .persistence import Database
 from .tracking_client import TrackingClient, fetch_zones
@@ -59,6 +61,9 @@ class RebindRequest(BaseModel):
     actor: str = "operator"
 
 
+_EMPTY_SHOW = ShowContent(rounds=[])
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.load()
     tracking = TrackingClient(
@@ -92,6 +97,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.bindings = bindings
         app.state.session_id = session_id
 
+        try:
+            show = await asyncio.to_thread(
+                load_show, settings.content_path, valid_zone_ids=app.state.zones.zone_ids()
+            )
+            log.info("Loaded show content: %d round(s) from %s", len(show.rounds), settings.content_path)
+        except (ContentError, FileNotFoundError) as exc:
+            log.warning("Could not load show content (%s); round control disabled", exc)
+            show = _EMPTY_SHOW
+        app.state.show = show
+        app.state.engine = GameEngine(db, session_id, show, bindings, tracking)
+
         bindings_task = asyncio.create_task(bindings.run())
         log_task = asyncio.create_task(_log_positions_periodically(tracking))
         try:
@@ -111,6 +127,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.zones = ZoneMap(enabled=False, default_zone=None, zones=[])
     app.state.bindings = None
     app.state.session_id = None
+    app.state.show = _EMPTY_SHOW
+    app.state.engine = None
 
     @app.get("/health")
     async def health() -> dict:
@@ -178,6 +196,72 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             pass
         finally:
             bindings.unsubscribe(queue)
+
+    # -------------------------------------------------------------- #
+    # Rounds & scoring
+    # -------------------------------------------------------------- #
+    @app.get("/api/rounds/current")
+    async def current_round() -> Optional[dict]:
+        engine: GameEngine = app.state.engine
+        rt = engine.current if engine else None
+        return engine.round_payload(rt) if rt else None
+
+    @app.get("/api/scores")
+    async def scores() -> dict:
+        engine: GameEngine = app.state.engine
+        return await engine.scores() if engine else {}
+
+    @app.post("/api/admin/rounds/start")
+    async def start_round() -> dict:
+        try:
+            rt = await app.state.engine.start_next_round()
+        except EngineError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return app.state.engine.round_payload(rt)
+
+    @app.post("/api/admin/rounds/close")
+    async def close_round() -> dict:
+        try:
+            rt = await app.state.engine.close_round()
+        except EngineError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return app.state.engine.round_payload(rt)
+
+    @app.post("/api/admin/rounds/reveal")
+    async def reveal_round() -> dict:
+        try:
+            rt = await app.state.engine.reveal_round()
+        except EngineError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return app.state.engine.round_payload(rt)
+
+    @app.websocket("/ws/player/{player_id}")
+    async def ws_player(websocket: WebSocket, player_id: str) -> None:
+        await websocket.accept()
+        engine: GameEngine = app.state.engine
+        queue = engine.subscribe()
+        try:
+            rt = engine.current
+            await websocket.send_json(
+                {
+                    "type": "hello",
+                    "round": engine.round_payload(rt) if rt else None,
+                    "scores": await engine.scores(),
+                }
+            )
+            while True:
+                event = await queue.get()
+                payload = dict(event.payload)
+                if event.type == "reveal":
+                    answer = engine.player_answer(player_id)
+                    payload["your_answer"] = {"zone": answer[0], "resolved": answer[1]} if answer else None
+                elif event.type == "scores_updated":
+                    payload["your_score"] = payload["scores"].get(player_id, 0)
+                await websocket.send_json({"type": event.type, **payload})
+        except WebSocketDisconnect:
+            pass
+        finally:
+            engine.unsubscribe(queue)
 
     # -------------------------------------------------------------- #
     # Web: player claim page + admin dashboard
