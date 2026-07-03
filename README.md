@@ -35,7 +35,11 @@ its `/ws` and `/api/zones` endpoints and never modifies it for game features.
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for the full design plan
-(phases, data model, binding/rebind logic, testing strategy).
+(phases, data model, binding/rebind logic, testing strategy),
+[`docs/touchdesigner.md`](docs/touchdesigner.md) for the TD cue vocabulary,
+and **[`docs/runbook.md`](docs/runbook.md) if you're running the actual
+show** — start order, health checks, what to do when something dies, and
+the content freeze process.
 
 ## Repo layout
 
@@ -46,15 +50,26 @@ server/
   bindings.py          # player<->GID state machine
   engine.py            # round state machine, timers, zone evaluation, scoring
   persistence.py       # SQLite (WAL), write-through, crash recovery
+  replay.py            # post-show timeline / state-at-a-moment reconstruction
   models.py            # pydantic models incl. copied TrackingBox message shapes
   content.py           # loads/validates rounds & questions from content/
 web/
   player/              # phone page (one per player ID)
-  admin/               # operator dashboard
+  admin/               # operator dashboard: round control, binding board,
+                        # floor map, TD cue log, scoreboard
 content/
   show.yaml            # rounds, questions, zone->answer mapping, timing
+scripts/
+  validate_content.py  # check show.yaml against a running TrackingBox's zones
+  replay.py            # CLI for server/replay.py
+td_scripts/
+  td_receive_cues.py   # TouchDesigner WebSocket DAT callback for /ws/td
 tests/
   scenarios/           # scripted GID-churn scenarios against the mock backend
+docs/
+  architecture.md      # the full design plan
+  touchdesigner.md     # TD cue vocabulary + setup
+  runbook.md           # ops runbook: start order, failure modes, replay
 ```
 
 ## Development

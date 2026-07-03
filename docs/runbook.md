@@ -1,0 +1,220 @@
+# Ops Runbook
+
+This is written for whoever is running the show from the booth — stage
+manager, usher lead, whoever. No programming required to follow it. If
+something isn't covered here, screenshot the admin dashboard and the
+terminal output before touching anything else.
+
+## Before doors open
+
+1. **Content is frozen.** See [Content freeze process](#content-freeze-process)
+   below — do this the day before, not at showtime.
+2. **Camera is positioned and the venue calibration is saved** to
+   `config.json` in the TrackingBox checkout (see TrackingBox's own
+   `docs/floor_projection.md` if this hasn't been done yet for this venue).
+3. Confirm both machines/checkouts are on the versions you rehearsed with:
+   - TrackingBox: pinned commit in this repo's [README](../README.md).
+   - This repo: whatever tag/commit you rehearsed the show on.
+
+## Start order
+
+Start TrackingBox **first**, wait for it to be healthy, **then** start the
+game server. Starting them the other way round isn't harmful (the game
+server retries the connection), but it makes the first couple of minutes
+of logs confusing.
+
+```bash
+# 1. TrackingBox, from its own checkout, with the venue's calibrated config
+audience-tracker serve --config config.json --port 8000
+
+# check it's alive before moving on:
+curl http://localhost:8000/health
+#   {"status":"ok","pipeline":true,"pipeline_running":true}
+#   pipeline_running:false means tracking died while the API stayed up — see
+#   "TrackingBox is up but nobody is being tracked" below.
+
+# 2. Game server, from this repo
+make dev
+# or, equivalently, with any RITUAL_ZONE_ID / tuning overrides for the night:
+RITUAL_ZONE_ID=ritual make dev
+
+curl http://localhost:8100/health
+#   {"status":"ok","tracking_connected":true,"tracking_ws_url":"..."}
+```
+
+Open the admin dashboard: `http://localhost:8100/admin/`. The binding
+board's connection indicator should say **connected** in green. If it
+says **disconnected**, the game server process isn't reachable — check its
+terminal for a crash, restart it (state survives, see
+[Crash recovery](#crash-recovery-what-actually-happens) below).
+
+## Onboarding players
+
+However the door process hands out player numbers (see
+`docs/architecture.md` §6 open question 1 — staggered entry, printed
+cards, or ushers with a tablet, depending on what was decided for this
+run), each player's phone needs to land on:
+
+```
+http://<venue-machine-ip>:8100/p/<their-player-id>
+```
+
+They type the number shown on their dot and tap Claim. Watch the binding
+board fill up as people join. **Do not start the first round until the
+binding board looks right** — spot-check a few players' states, and use
+the floor map to sanity-check that GIDs are roughly where you'd expect
+people to physically be standing.
+
+## Running the show
+
+From the admin dashboard's **Round control** section:
+
+- **Start next round** — opens the next question in `content/show.yaml`.
+  Timing is automatic from there (`duration_s`, then `grace_s`), but you
+  can also:
+- **Close** — lock in answers early (e.g. everyone's clearly settled and
+  you don't want to wait out the full timer).
+- **Reveal** — force the reveal early, or manually finish a round that got
+  interrupted by a restart (see below).
+
+Watch the **Scoreboard** section update after each reveal. The **Binding
+board** keeps running underneath the whole time — orphaned players
+(yellow) are being prompted to the ritual corner automatically; a
+persistent orphan (more than a few seconds) is your cue to walk over and
+help, or use the **Rebind** button next to their row once you can see
+which dot is them.
+
+## Health checks, anytime
+
+```bash
+curl http://localhost:8000/health          # TrackingBox
+curl http://localhost:8100/health          # game server
+curl http://localhost:8100/api/rounds/current
+curl http://localhost:8100/api/scores
+```
+
+## When things go wrong
+
+**TrackingBox process dies.** The game server keeps running and keeps
+retrying the connection (exponential backoff, capped). Every bound player
+will show as `lost` within a few seconds — this is expected, not a bug.
+Restart TrackingBox with the same command as before; the game server
+reconnects automatically, gets a fresh snapshot, and the auto-rebind/
+ritual flow takes it from there. You don't need to restart the game
+server for this.
+
+**TrackingBox is up but nobody is being tracked.** `curl .../health` shows
+`"pipeline_running": false` — the tracking thread died but the API stayed
+alive. This means a persistent camera fault (unplugged, driver crash).
+Check the TrackingBox terminal output, fix the camera connection, and
+restart TrackingBox.
+
+**Game server process dies.** Restart it (`make dev` again, or however
+your venue script launches it). See
+[Crash recovery](#crash-recovery-what-actually-happens) — nothing is lost,
+but read that section once before showtime so a restart mid-round doesn't
+surprise you.
+
+**A specific player is stuck `lost` or `orphaned` for a while.** This is
+normal under heavy tracking churn and usually resolves itself (auto-rebind
+or the ritual prompt) within a few seconds. If it doesn't:
+1. Have them re-type their number if the phone is showing the claim form
+   again (it does, automatically, once `lost`).
+2. Or use the admin dashboard's **Rebind** button on their row — type the
+   GID you can see is them (cross-reference the floor position) and hit
+   Rebind. This works from any state and can even steal a GID from someone
+   else if you've misjudged (that other player will show `lost` and can
+   redo the same process).
+
+**WebSocket DAT in TouchDesigner shows stale data.** Enable auto-reconnect
+on the WebSocket DAT if your TD build supports it. Both `/ws` (raw
+positions, from TrackingBox) and `/ws/td` (round/cue events, from this
+server) resend a full snapshot/`hello` on every reconnect, so a dropped
+connection self-heals once it reconnects.
+
+**A round got interrupted mid-way (server crash, TrackingBox restart
+during closing).** After the game server restarts, check
+`GET /api/rounds/current` — if it shows a round in `closing` state, that
+round's answers were preserved but nobody revealed it yet. Hit **Reveal**
+on the admin dashboard to finish it manually; it will not repeat or
+re-run.
+
+## Crash recovery: what actually happens
+
+Every meaningful state change (a claim, a rebind, a round opening,
+closing, or revealing, a score) is written to SQLite immediately — not
+batched, not buffered. If the game server process dies for any reason and
+you restart it against the same database file:
+
+- Every player's binding state (who's bound to what GID, or lost) is
+  exactly as it was the instant before the crash.
+- If the last round had already fully finished (revealed), the show
+  resumes cleanly at the next round — nothing repeats.
+- If a round was interrupted mid-flight (someone had closed it, but it
+  hadn't been revealed yet), it comes back in a `closing` state with every
+  answer that had already been recorded — nothing is lost — and waits for
+  an operator to hit **Reveal**. It deliberately does *not* try to guess
+  how much time was left on the original timer and resume it automatically
+  (the server doesn't know how long it was down for).
+
+You do not need to do anything special to "resume" a session — starting
+the game server against the same `--db` file (the default, unless
+`GAME_DB_PATH` was overridden) picks the same session back up
+automatically. The startup log line tells you which happened:
+
+```
+Started new session 1              # fresh start
+Resuming session 1 (crash recovery)  # picked up where it left off
+```
+
+## Post-show: replay and audit
+
+Every binding change, answer, and score event is in the database with a
+timestamp and a reason — this is the "why did seat-14 lose points in round
+3" answer machine.
+
+```bash
+python scripts/replay.py --db data/theater-game.db --list-sessions
+python scripts/replay.py --db data/theater-game.db --timeline
+python scripts/replay.py --db data/theater-game.db --player seat-14
+python scripts/replay.py --db data/theater-game.db --at 1730000000   # state as of a unix timestamp
+```
+
+This is safe to run while the show is still live (SQLite WAL mode allows
+concurrent reads), so it also works as a rehearsal-night tuning tool — see
+`docs/architecture.md` §7's note on the rehearsal telemetry feedback loop
+for `REBIND_MAX_DISTANCE` / `REBIND_MAX_GAP_S` / `ORPHAN_AFTER_S`.
+
+## Content freeze process
+
+`content/show.yaml` can be edited and reloaded without restarting the
+server:
+
+```bash
+curl -X POST http://localhost:8100/api/admin/content/reload
+```
+
+This re-validates the file (every answer option must reference a real
+TrackingBox zone — a typo is rejected, not silently accepted) and swaps it
+in. It's refused with a 409 if a round is currently in progress — reload
+between rounds only.
+
+**Freeze content before doors open.** Live-reloading is for rehearsal
+iteration, not for changing the show while it's running:
+
+1. Whoever owns the questions edits `content/show.yaml` directly — it's
+   plain YAML, no code required. See the existing rounds for the format
+   (`type: majority | minority | correct_zone`, `options` each with a
+   `zone` that must match a real TrackingBox zone id).
+2. Validate it against the venue's actual zone map before the show
+   (requires TrackingBox already running with the venue's zone config):
+   ```bash
+   python scripts/validate_content.py
+   #   OK: content/show.yaml — 3 round(s) validated against 3 live zone(s)
+   #     [majority     ] r1: 'Coffee or tea?' -> answer_a (Coffee), answer_b (Tea)
+   #     ...
+   ```
+3. Once the show starts, don't edit content further unless you have a
+   specific, tested reason and you do it between rounds — reordering or
+   removing rounds mid-show can shift what "round 3" means for anyone
+   relying on the recovered index after a restart.

@@ -39,6 +39,12 @@
     .cue-form input#cue-payload { flex: 1; }
     .cue-log { max-height: 10rem; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 0.8rem; background: #101018; border: 1px solid #26262f; border-radius: 0.4rem; padding: 0.5rem; }
     .cue-log div { padding: 0.1rem 0; border-bottom: 1px solid #1a1a22; }
+    .floor-map { background: #101018; border: 1px solid #26262f; border-radius: 0.4rem; width: 100%; max-width: 32rem; aspect-ratio: 1; }
+    .floor-map circle.bound { fill: #4ade80; }
+    .floor-map circle.lost { fill: #f87171; opacity: 0.5; }
+    .floor-map circle.orphaned { fill: #fbbf24; }
+    .floor-map text { fill: #f4f4f8; font-size: 3px; font-family: ui-monospace, monospace; }
+    button.ritual-btn { background: #b45309; margin-left: 0.3rem; }
   </style>
 </head>
 <body>
@@ -50,6 +56,11 @@
       <button onclick="roundAction('reveal')">Reveal</button>
     </div>
     <div class="round-status" id="round-status">No round loaded.</div>
+  </section>
+
+  <section>
+    <h1>Floor map</h1>
+    <svg class="floor-map" id="floor-map" viewBox="0 0 100 100"></svg>
   </section>
 
   <section>
@@ -104,10 +115,44 @@
           <td>
             <input class="rebind-gid" type="number" placeholder="gid" id="rebind-${p.id}" />
             <button onclick="rebind('${p.id}')">Rebind</button>
+            ${p.state === "lost" || p.state === "orphaned"
+              ? `<button class="ritual-btn" onclick="sendToRitual('${p.id}')">Send to ritual</button>`
+              : ""}
           </td>
         </tr>
       `).join("");
+      renderFloorMap(list);
     }
+
+    function renderFloorMap(list) {
+      const svg = document.getElementById("floor-map");
+      const dots = list
+        .filter((p) => p.last_seen_x != null && p.last_seen_y != null)
+        .map((p) => {
+          const x = (p.last_seen_x * 100).toFixed(1);
+          const y = (p.last_seen_y * 100).toFixed(1);
+          return `
+            <g>
+              <circle class="${p.state}" cx="${x}" cy="${y}" r="2.2"><title>${p.id} (${p.state}, gid ${p.gid ?? "—"})</title></circle>
+              <text x="${x}" y="${Number(y) - 3}" text-anchor="middle">${p.id}</text>
+            </g>
+          `;
+        })
+        .join("");
+      svg.innerHTML = dots;
+    }
+
+    window.sendToRitual = async function (playerId) {
+      const resp = await fetch("/api/admin/cues/ritual_prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload: { player_id: playerId, corner_zone: "ritual" } }),
+      });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        alert(body.detail || `cue failed (${resp.status})`);
+      }
+    };
 
     window.rebind = async function (playerId) {
       const input = document.getElementById(`rebind-${playerId}`);

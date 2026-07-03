@@ -157,6 +157,61 @@ async def test_admin_fire_cue_reaches_td_subscribers(fake_backend, fake_zones_ht
 
 
 @pytest.mark.asyncio
+async def test_content_reload_endpoint(fake_backend, fake_zones_http, tmp_path):
+    content_path = tmp_path / "show.yaml"
+    content_path.write_text(
+        "version: '1'\n"
+        "rounds:\n"
+        "  - id: r1\n"
+        "    question: Original\n"
+        "    options:\n"
+        "      - {zone: answer_a, label: A}\n"
+        "      - {zone: answer_b, label: B}\n"
+    )
+    settings = Settings(
+        tracking_ws_url=fake_backend.ws_url,
+        tracking_http_url=fake_zones_http,
+        db_path=str(tmp_path / "game.db"),
+        content_path=str(content_path),
+    )
+    app = create_app(settings)
+
+    async with LifespanManager(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            assert app.state.show.rounds[0].question == "Original"
+
+            content_path.write_text(
+                "version: '2'\n"
+                "rounds:\n"
+                "  - id: r1\n"
+                "    question: Updated\n"
+                "    options:\n"
+                "      - {zone: answer_a, label: A}\n"
+                "      - {zone: answer_b, label: B}\n"
+            )
+            resp = await client.post("/api/admin/content/reload")
+            assert resp.status_code == 200
+            assert resp.json() == {"ok": True, "rounds": 1}
+            assert app.state.show.rounds[0].question == "Updated"
+
+            # Refused once a round is in flight.
+            await client.post("/api/admin/rounds/start")
+            content_path.write_text(
+                "version: '3'\n"
+                "rounds:\n"
+                "  - id: r1\n"
+                "    question: Should not apply\n"
+                "    options:\n"
+                "      - {zone: answer_a, label: A}\n"
+                "      - {zone: answer_b, label: B}\n"
+            )
+            resp = await client.post("/api/admin/content/reload")
+            assert resp.status_code == 409
+            assert app.state.engine.show.rounds[0].question == "Updated"
+
+
+@pytest.mark.asyncio
 async def test_player_page_served(fake_backend, fake_zones_http, tmp_path):
     app = create_app(_settings(fake_backend, fake_zones_http, tmp_path))
 
