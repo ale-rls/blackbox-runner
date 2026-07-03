@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 import pytest
 from asgi_lifespan import LifespanManager
@@ -119,6 +121,39 @@ async def test_round_lifecycle_via_admin_endpoints(fake_backend, fake_zones_http
             # Closing again with nothing active is rejected.
             resp = await client.post("/api/admin/rounds/close")
             assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_admin_fire_cue_reaches_td_subscribers(fake_backend, fake_zones_http, tmp_path):
+    app = create_app(_settings(fake_backend, fake_zones_http, tmp_path))
+
+    async with LifespanManager(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            engine = app.state.engine
+            queue = engine.subscribe()
+
+            resp = await client.post(
+                "/api/admin/cues/ritual_prompt",
+                json={"payload": {"player_id": "seat-1", "corner_zone": "answer_a"}},
+            )
+            assert resp.status_code == 200
+            assert resp.json() == {
+                "ok": True,
+                "cue": "ritual_prompt",
+                "payload": {"player_id": "seat-1", "corner_zone": "answer_a"},
+            }
+
+            event = await asyncio.wait_for(queue.get(), timeout=1)
+            assert event.type == "ritual_prompt"
+            assert event.payload["player_id"] == "seat-1"
+
+            # No body at all is also valid — defaults to an empty payload.
+            resp = await client.post("/api/admin/cues/blackout")
+            assert resp.status_code == 200
+            event = await asyncio.wait_for(queue.get(), timeout=1)
+            assert event.type == "blackout"
+            assert event.payload == {}
 
 
 @pytest.mark.asyncio

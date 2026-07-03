@@ -79,7 +79,7 @@ def show():
 
 @pytest.fixture
 def engine(db, bindings, tracking, show):
-    return GameEngine(db, bindings.session_id, show, bindings, tracking)
+    return GameEngine(db, bindings.session_id, show, bindings, tracking, zone_count_interval_s=0.05)
 
 
 async def _claim_bound(bindings, tracking, player_id, gid, zone):
@@ -259,3 +259,58 @@ async def test_no_more_rounds_raises(db, tracking):
 
     with pytest.raises(EngineError):
         await engine.start_next_round()
+
+
+@pytest.mark.asyncio
+async def test_publish_cue_reaches_subscribers(engine):
+    queue = engine.subscribe()
+    engine.publish_cue("ritual_prompt", {"player_id": "seat-1", "corner_zone": "a"})
+    event = await asyncio.wait_for(queue.get(), timeout=1)
+    assert event.type == "ritual_prompt"
+    assert event.payload == {"player_id": "seat-1", "corner_zone": "a"}
+
+
+@pytest.mark.asyncio
+async def test_publish_cue_defaults_to_empty_payload(engine):
+    queue = engine.subscribe()
+    engine.publish_cue("blackout")
+    event = await asyncio.wait_for(queue.get(), timeout=1)
+    assert event.type == "blackout"
+    assert event.payload == {}
+
+
+@pytest.mark.asyncio
+async def test_current_zone_counts_empty_without_active_round(engine):
+    assert engine.current_zone_counts() == {}
+
+
+@pytest.mark.asyncio
+async def test_zone_counts_broadcast_during_active_round(engine, bindings, tracking):
+    await _claim_bound(bindings, tracking, "p1", 1, "a")
+    await _claim_bound(bindings, tracking, "p2", 2, "a")
+    await _claim_bound(bindings, tracking, "p3", 3, "b")
+
+    queue = engine.subscribe()
+    await engine.start_next_round()
+
+    # Drain events until we see a zone_counts cue (round_opened comes first).
+    counts = None
+    for _ in range(20):
+        event = await asyncio.wait_for(queue.get(), timeout=1)
+        if event.type == "zone_counts":
+            counts = event.payload["counts"]
+            break
+    assert counts == {"a": 2, "b": 1}
+    assert engine.current_zone_counts() == {"a": 2, "b": 1}
+
+
+@pytest.mark.asyncio
+async def test_zone_counts_broadcast_stops_after_close(engine, bindings, tracking):
+    await _claim_bound(bindings, tracking, "p1", 1, "a")
+    await engine.start_next_round()
+    await engine.close_round()
+
+    queue = engine.subscribe()
+    # No more zone_counts should arrive once the round is no longer active.
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(queue.get(), timeout=0.2)
