@@ -61,6 +61,10 @@ class RebindRequest(BaseModel):
     actor: str = "operator"
 
 
+class CueRequest(BaseModel):
+    payload: dict = {}
+
+
 _EMPTY_SHOW = ShowContent(rounds=[])
 
 
@@ -114,6 +118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             tracking.stop()
+            app.state.engine.shutdown()
             for task in (tracking_task, bindings_task, log_task):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -258,6 +263,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 elif event.type == "scores_updated":
                     payload["your_score"] = payload["scores"].get(player_id, 0)
                 await websocket.send_json({"type": event.type, **payload})
+        except WebSocketDisconnect:
+            pass
+        finally:
+            engine.unsubscribe(queue)
+
+    # -------------------------------------------------------------- #
+    # TouchDesigner — round/cue WS (docs/touchdesigner.md)
+    # -------------------------------------------------------------- #
+    @app.post("/api/admin/cues/{cue_type}")
+    async def fire_cue(cue_type: str, body: Optional[CueRequest] = None) -> dict:
+        """Manually fire a named cue to every /ws/td (and /ws/player) listener.
+        Used for tech rehearsal and for cues that don't yet have an automatic
+        trigger — e.g. 'ritual_prompt' ahead of Phase 4's real ritual flow.
+        """
+        payload = body.payload if body else {}
+        app.state.engine.publish_cue(cue_type, payload)
+        return {"ok": True, "cue": cue_type, "payload": payload}
+
+    @app.websocket("/ws/td")
+    async def ws_td(websocket: WebSocket) -> None:
+        await websocket.accept()
+        engine: GameEngine = app.state.engine
+        queue = engine.subscribe()
+        try:
+            rt = engine.current
+            await websocket.send_json(
+                {
+                    "type": "hello",
+                    "round": engine.round_payload(rt) if rt else None,
+                    "zone_counts": engine.current_zone_counts(),
+                    "zones": app.state.zones.model_dump(),
+                }
+            )
+            while True:
+                event = await queue.get()
+                await websocket.send_json({"type": event.type, **event.payload})
         except WebSocketDisconnect:
             pass
         finally:

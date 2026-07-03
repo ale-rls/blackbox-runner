@@ -33,6 +33,12 @@
     .round-controls { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
     .scoreboard { display: flex; flex-wrap: wrap; gap: 0.5rem; }
     .score-chip { background: #16161f; border: 1px solid #333; border-radius: 0.4rem; padding: 0.3em 0.7em; font-size: 0.9rem; }
+    .cue-form { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .cue-form input { background: #16161f; border: 1px solid #444; color: inherit; padding: 0.3em 0.6em; border-radius: 0.3em; }
+    .cue-form input#cue-type { width: 10em; }
+    .cue-form input#cue-payload { flex: 1; }
+    .cue-log { max-height: 10rem; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 0.8rem; background: #101018; border: 1px solid #26262f; border-radius: 0.4rem; padding: 0.5rem; }
+    .cue-log div { padding: 0.1rem 0; border-bottom: 1px solid #1a1a22; }
   </style>
 </head>
 <body>
@@ -44,6 +50,17 @@
       <button onclick="roundAction('reveal')">Reveal</button>
     </div>
     <div class="round-status" id="round-status">No round loaded.</div>
+  </section>
+
+  <section>
+    <h1>TD cue stream (/ws/td)</h1>
+    <div class="conn down" id="td-conn">connecting…</div>
+    <div class="cue-form">
+      <input id="cue-type" placeholder="cue type, e.g. ritual_prompt" />
+      <input id="cue-payload" placeholder='payload JSON, e.g. {"player_id":"seat-1"}' />
+      <button onclick="fireCue()">Fire</button>
+    </div>
+    <div class="cue-log" id="cue-log"></div>
   </section>
 
   <section>
@@ -166,7 +183,56 @@
       }
     }
 
+    // ---- TD cue stream, mirrored here for rehearsal/debugging ----
+    const tdConnEl = document.getElementById("td-conn");
+    const cueLogEl = document.getElementById("cue-log");
+
+    function logCue(msg) {
+      const line = document.createElement("div");
+      const time = new Date().toLocaleTimeString();
+      line.textContent = `${time}  ${msg.type}  ${JSON.stringify(msg)}`;
+      cueLogEl.prepend(line);
+      while (cueLogEl.childElementCount > 50) cueLogEl.removeChild(cueLogEl.lastChild);
+    }
+
+    function connectTd() {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${proto}://${location.host}/ws/td`);
+      ws.onopen = () => { tdConnEl.textContent = "connected"; tdConnEl.className = "conn ok"; };
+      ws.onclose = () => {
+        tdConnEl.textContent = "disconnected — retrying…";
+        tdConnEl.className = "conn down";
+        setTimeout(connectTd, 1500);
+      };
+      ws.onmessage = (evt) => logCue(JSON.parse(evt.data));
+    }
+
+    window.fireCue = async function () {
+      const cueType = document.getElementById("cue-type").value.trim();
+      if (!cueType) return;
+      const rawPayload = document.getElementById("cue-payload").value.trim();
+      let payload = {};
+      if (rawPayload) {
+        try {
+          payload = JSON.parse(rawPayload);
+        } catch (err) {
+          alert("payload must be valid JSON");
+          return;
+        }
+      }
+      const resp = await fetch(`/api/admin/cues/${encodeURIComponent(cueType)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload }),
+      });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        alert(body.detail || `cue failed (${resp.status})`);
+      }
+    };
+
     connect();
+    connectTd();
     refreshRound();
     refreshScores();
     setInterval(render, 1000); // keep "last seen" timers fresh

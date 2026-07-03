@@ -70,16 +70,20 @@ class GameEngine:
         show: ShowContent,
         bindings: BindingManager,
         tracking: TrackingClient,
+        *,
+        zone_count_interval_s: float = 1.0,
     ) -> None:
         self._db = db
         self.session_id = session_id
         self.show = show
         self._bindings = bindings
         self._tracking = tracking
+        self._zone_count_interval_s = zone_count_interval_s
         self._index = -1
         self._current: Optional[RoundRuntime] = None
         self._listeners: list[asyncio.Queue] = []
         self._timer_task: Optional[asyncio.Task] = None
+        self._zone_task: Optional[asyncio.Task] = None
 
     # ------------------------------------------------------------------ #
     # Subscription (player / TD / admin WS)
@@ -100,6 +104,13 @@ class GameEngine:
             except asyncio.QueueFull:
                 log.warning("Dropping engine event: subscriber queue full")
 
+    def publish_cue(self, cue_type: str, payload: Optional[dict] = None) -> None:
+        """Fire an arbitrary named cue to every subscriber (TD, admin, rehearsal
+        scripts). The round lifecycle events below are just the built-in cues —
+        this is the same channel the plan calls the "round/cue WS".
+        """
+        self._publish(EngineEvent(cue_type, payload or {}))
+
     # ------------------------------------------------------------------ #
     # Read side
     # ------------------------------------------------------------------ #
@@ -118,6 +129,17 @@ class GameEngine:
         if self._current is None:
             return None
         return self._current.answers.get(player_id)
+
+    def current_zone_counts(self) -> dict[str, int]:
+        rt = self._current
+        if rt is None:
+            return {}
+        counts = {opt.zone: 0 for opt in rt.content.options}
+        for player in self._bindings.all_players():
+            zone = self._current_zone(player)
+            if zone in counts:
+                counts[zone] += 1
+        return counts
 
     # ------------------------------------------------------------------ #
     # Round control
@@ -144,6 +166,8 @@ class GameEngine:
         self._publish(EngineEvent("round_opened", self.round_payload(rt)))
         self._cancel_timer()
         self._timer_task = asyncio.create_task(self._run_active_timer(rt))
+        self._cancel_zone_task()
+        self._zone_task = asyncio.create_task(self._run_zone_counts(rt))
         return rt
 
     async def close_round(self) -> RoundRuntime:
@@ -170,6 +194,32 @@ class GameEngine:
             self._timer_task.cancel()
         self._timer_task = None
 
+    def _cancel_zone_task(self) -> None:
+        if self._zone_task is not None and not self._zone_task.done():
+            self._zone_task.cancel()
+        self._zone_task = None
+
+    def shutdown(self) -> None:
+        self._cancel_timer()
+        self._cancel_zone_task()
+
+    async def _run_zone_counts(self, rt: RoundRuntime) -> None:
+        """Live per-zone headcount while a round is active, for TD's bar
+        visuals — distinct from the one-shot tally computed at reveal.
+        """
+        zones = [opt.zone for opt in rt.content.options]
+        try:
+            while self._current is rt and rt.state == RoundState.ACTIVE:
+                counts = {zone: 0 for zone in zones}
+                for player in self._bindings.all_players():
+                    zone = self._current_zone(player)
+                    if zone in counts:
+                        counts[zone] += 1
+                self._publish(EngineEvent("zone_counts", {"round_id": rt.content.id, "counts": counts}))
+                await asyncio.sleep(self._zone_count_interval_s)
+        except asyncio.CancelledError:
+            return
+
     async def _run_active_timer(self, rt: RoundRuntime) -> None:
         try:
             await asyncio.sleep(rt.content.duration_s)
@@ -193,6 +243,7 @@ class GameEngine:
     async def _do_close(self, rt: RoundRuntime) -> None:
         rt.state = RoundState.CLOSING
         rt.closed_at = time.time()
+        self._cancel_zone_task()
         await asyncio.to_thread(
             self._db.update_round_state, rt.row_id, RoundState.CLOSING.value, rt.opened_at, rt.closed_at
         )
