@@ -89,12 +89,21 @@ class FakeTrackingBox:
         self._server: websockets.WebSocketServer | None = None
         self.port: int | None = None
         self.close_after_change = False
+        # When True, send the two change events as one rate-limited
+        # ``{"type": "update", "people": [...]}`` message instead of two
+        # bare per-GID messages (TrackingBox's ws_max_rate_hz > 0 mode).
+        self.batch_changes = False
 
     async def _handler(self, ws: websockets.WebSocketServerProtocol) -> None:
         self.connection_count += 1
         await ws.send(json.dumps(SNAPSHOT))
-        await ws.send(json.dumps(CHANGE_MOVE_GID_1))
-        await ws.send(json.dumps(CHANGE_GID_2_GONE))
+        if self.batch_changes:
+            await ws.send(
+                json.dumps({"type": "update", "people": [CHANGE_MOVE_GID_1, CHANGE_GID_2_GONE]})
+            )
+        else:
+            await ws.send(json.dumps(CHANGE_MOVE_GID_1))
+            await ws.send(json.dumps(CHANGE_GID_2_GONE))
         if self.close_after_change:
             await ws.close()
             return

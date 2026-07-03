@@ -43,8 +43,8 @@ and never modify it for game features.
 
 ### TrackingBox WS contract (as pinned)
 
-The `/ws` endpoint sends one of two shapes, undiscriminated except by the
-presence of `type`:
+The `/ws` endpoint sends one of three shapes, undiscriminated except by the
+presence and value of `type`:
 
 * `{"type": "snapshot", "data": {...}}` — full snapshot, sent once on
   connect and again on every heartbeat (`ws_heartbeat_interval_s`, default
@@ -53,6 +53,12 @@ presence of `type`:
   `{"gid": int, "visible": bool, "center": [x,y]|null, "bbox": [...]|null,
   "floor": [x,y]|null, "floor_valid": bool, "zone": str|null}`. A GID
   dropping out of the snapshot entirely is emitted as `visible: false`.
+  Sent only when TrackingBox's rate limiting is off (`ws_max_rate_hz: 0`).
+* `{"type": "update", "people": [<change event>, ...]}` — with rate limiting
+  on (`ws_max_rate_hz` > 0, TrackingBox's default of 20), change events are
+  coalesced (last event per GID wins) into one batched message per tick.
+  Note that under steady change-event traffic the heartbeat snapshot never
+  fires, so this is the shape carrying nearly all live state.
 
 `floor` is calibrated floor-space `[x, y]`, used for zone lookups. `zone` is
 already resolved server-side by TrackingBox's `ZoneMap` (first enabled zone
