@@ -3,286 +3,702 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Blackbox Runner — Binding Board</title>
+  <title>Blackbox Runner — Console</title>
   <style>
-    :root { color-scheme: dark; }
-    body {
-      margin: 0; padding: 1.5rem;
-      background: #0b0b12; color: #f4f4f8;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    :root {
+      color-scheme: dark;
+      --bg: #0a0a10;
+      --panel: #12121b;
+      --panel-2: #0e0e16;
+      --border: #23232f;
+      --border-soft: #1a1a24;
+      --text: #eceef4;
+      --muted: #8b8d9d;
+      --accent: #6d74f6;
+      --accent-hover: #7f86ff;
+      --green: #4ade80;
+      --red: #f87171;
+      --amber: #fbbf24;
+      --grey: #6b7280;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
-    h1 { font-size: 1.2rem; margin: 0 0 1rem; }
-    .conn { font-size: 0.85rem; opacity: 0.7; margin-bottom: 1rem; }
-    .conn.ok { color: #4ade80; }
-    .conn.down { color: #f87171; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
-    th, td { text-align: left; padding: 0.5rem 0.7rem; border-bottom: 1px solid #26262f; }
-    th { opacity: 0.6; font-weight: 500; text-transform: uppercase; font-size: 0.75rem; }
-    .state { padding: 0.15rem 0.5rem; border-radius: 0.4rem; font-size: 0.8rem; font-weight: 600; }
-    .state.bound { background: #16321f; color: #4ade80; }
-    .state.lost { background: #351818; color: #f87171; }
-    .state.unclaimed { background: #33291a; color: #fbbf24; }
-    .state.orphaned { background: #33291a; color: #fbbf24; }
-    .state.left { background: #222; color: #999; }
-    input.rebind-gid { width: 5em; background: #16161f; border: 1px solid #444; color: inherit; padding: 0.2em 0.4em; border-radius: 0.3em; }
-    button { background: #5b6bf6; color: white; border: none; padding: 0.3em 0.8em; border-radius: 0.3em; cursor: pointer; }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body {
+      margin: 0; min-height: 100vh;
+      background: var(--bg);
+      background-image: radial-gradient(80rem 30rem at 50% -15rem, rgba(109, 116, 246, 0.14), transparent);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.92rem;
+    }
+
+    header {
+      display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+      padding: 0.9rem 1.4rem;
+      border-bottom: 1px solid var(--border-soft);
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(10, 10, 16, 0.85); backdrop-filter: blur(8px);
+    }
+    .brand { font-weight: 700; letter-spacing: 0.02em; }
+    .brand .dot { color: var(--accent); }
+    .brand small { color: var(--muted); font-weight: 400; margin-left: 0.5rem; }
+    .pills { display: flex; gap: 0.5rem; margin-left: auto; flex-wrap: wrap; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 0.45em;
+      font-size: 0.78rem; color: var(--muted);
+      border: 1px solid var(--border); border-radius: 999px;
+      padding: 0.25em 0.8em; background: var(--panel-2);
+    }
+    .pill::before { content: ""; width: 0.55em; height: 0.55em; border-radius: 50%; background: var(--grey); }
+    .pill.ok { color: var(--green); }
+    .pill.ok::before { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .pill.down { color: var(--red); }
+    .pill.down::before { background: var(--red); }
+
+    main {
+      display: grid; gap: 1rem; padding: 1.2rem 1.4rem 3rem;
+      max-width: 90rem; margin: 0 auto;
+      grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+      grid-template-areas:
+        "round round"
+        "board map"
+        "board scores"
+        "cues  scores";
+      align-items: start;
+    }
+    @media (max-width: 60rem) {
+      main { grid-template-columns: 1fr; grid-template-areas: "round" "map" "board" "scores" "cues"; }
+    }
+    #card-round { grid-area: round; }
+    #card-board { grid-area: board; }
+    #card-map { grid-area: map; }
+    #card-scores { grid-area: scores; }
+    #card-cues { grid-area: cues; }
+
+    .card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 0.8rem; padding: 1rem 1.1rem;
+    }
+    .card-head {
+      display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap;
+      margin-bottom: 0.8rem;
+    }
+    .card-head h2 {
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.13em;
+      text-transform: uppercase; color: var(--muted); margin: 0;
+    }
+    .card-head .aux { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; }
+
+    button {
+      font: inherit; border: 1px solid var(--border); border-radius: 0.45rem;
+      background: var(--panel-2); color: var(--text);
+      padding: 0.42em 0.95em; cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
     button:disabled { opacity: 0.4; cursor: default; }
-    .empty { opacity: 0.5; padding: 2rem 0; text-align: center; }
-    section { margin-bottom: 2rem; }
-    .round-status { font-size: 0.95rem; opacity: 0.85; margin: 0.5rem 0; }
-    .round-controls { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
-    .scoreboard { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-    .score-chip { background: #16161f; border: 1px solid #333; border-radius: 0.4rem; padding: 0.3em 0.7em; font-size: 0.9rem; }
-    .cue-form { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
-    .cue-form input { background: #16161f; border: 1px solid #444; color: inherit; padding: 0.3em 0.6em; border-radius: 0.3em; }
-    .cue-form input#cue-type { width: 10em; }
-    .cue-form input#cue-payload { flex: 1; }
-    .cue-log { max-height: 10rem; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 0.8rem; background: #101018; border: 1px solid #26262f; border-radius: 0.4rem; padding: 0.5rem; }
-    .cue-log div { padding: 0.1rem 0; border-bottom: 1px solid #1a1a22; }
-    .floor-map { background: #101018; border: 1px solid #26262f; border-radius: 0.4rem; width: 100%; max-width: 32rem; aspect-ratio: 1; }
-    .floor-map circle.bound { fill: #4ade80; }
-    .floor-map circle.lost { fill: #f87171; opacity: 0.5; }
-    .floor-map circle.orphaned { fill: #fbbf24; }
-    .floor-map text { fill: #f4f4f8; font-size: 3px; font-family: ui-monospace, monospace; }
-    button.ritual-btn { background: #b45309; margin-left: 0.3rem; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    button.primary:hover { background: var(--accent-hover); }
+    button.ghost { color: var(--muted); }
+    button.small { font-size: 0.8rem; padding: 0.3em 0.7em; }
+    button.ritual { border-color: rgba(251, 191, 36, 0.4); color: var(--amber); }
+    input[type="text"], input:not([type]) , input[type="number"] {
+      font: inherit; background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 0.45rem; padding: 0.4em 0.6em;
+    }
+    input:focus { outline: none; border-color: var(--accent); }
+    .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+    /* Round control */
+    .round-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .round-state {
+      font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+      padding: 0.3em 0.85em; border-radius: 999px; border: 1px solid var(--border);
+      background: var(--panel-2); color: var(--muted);
+    }
+    .round-state.active { color: var(--green); border-color: rgba(74, 222, 128, 0.4); }
+    .round-state.closing { color: var(--amber); border-color: rgba(251, 191, 36, 0.4); }
+    .round-state.revealed, .round-state.done { color: var(--accent); border-color: rgba(109, 116, 246, 0.5); }
+    .round-question { font-size: 1.25rem; font-weight: 700; flex: 1 1 14rem; }
+    .round-question.idle { color: var(--muted); font-weight: 400; font-size: 1rem; }
+    .round-countdown { font-size: 1.6rem; font-weight: 700; min-width: 3ch; text-align: right; }
+    .round-countdown.grace { color: var(--amber); font-size: 1rem; font-weight: 600; }
+    .round-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.9rem; }
+    .round-actions .spacer { flex: 1; }
+
+    /* Binding board */
+    .counts { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    .count-chip { font-size: 0.75rem; padding: 0.2em 0.7em; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+    .count-chip b { color: var(--text); font-weight: 700; }
+    .count-chip.bound b { color: var(--green); }
+    .count-chip.lost b { color: var(--red); }
+    .count-chip.orphaned b { color: var(--amber); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border-soft); }
+    th { color: var(--muted); font-weight: 500; text-transform: uppercase; font-size: 0.68rem; letter-spacing: 0.1em; }
+    tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
+    td .name-note { color: var(--muted); }
+    .state {
+      display: inline-block; padding: 0.18em 0.65em; border-radius: 999px;
+      font-size: 0.75rem; font-weight: 600;
+    }
+    .state.bound { background: rgba(74, 222, 128, 0.12); color: var(--green); }
+    .state.lost { background: rgba(248, 113, 113, 0.12); color: var(--red); }
+    .state.unclaimed, .state.orphaned { background: rgba(251, 191, 36, 0.12); color: var(--amber); }
+    .state.left { background: rgba(107, 114, 128, 0.15); color: var(--grey); }
+    .row-actions { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; }
+    input.rebind-gid { width: 5.5em; font-family: var(--mono); }
+    .empty { color: var(--muted); padding: 1.6rem 0; text-align: center; }
+
+    /* Floor map */
+    .floor-map { width: 100%; aspect-ratio: 1; background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 0.6rem; display: block; }
+    .floor-map .zone { fill: rgba(109, 116, 246, 0.05); stroke: rgba(109, 116, 246, 0.35); stroke-width: 0.3; }
+    .floor-map .zone-label { fill: var(--muted); font-size: 3px; font-family: var(--mono); letter-spacing: 0.05em; }
+    .floor-map .p-label { fill: var(--text); font-size: 3.2px; font-family: var(--mono); paint-order: stroke; stroke: rgba(10, 10, 16, 0.8); stroke-width: 0.8; }
+    .floor-map .gid-label { fill: var(--muted); font-size: 2.6px; font-family: var(--mono); }
+    .floor-map circle.bound { fill: var(--green); }
+    .floor-map circle.lost { fill: var(--red); opacity: 0.55; }
+    .floor-map circle.orphaned { fill: var(--amber); }
+    .floor-map circle.unbound { fill: none; stroke: var(--grey); stroke-width: 0.4; }
+    .legend { display: flex; gap: 0.9rem; flex-wrap: wrap; margin-top: 0.6rem; font-size: 0.75rem; color: var(--muted); }
+    .legend span::before { content: "●"; margin-right: 0.35em; }
+    .legend .l-bound::before { color: var(--green); }
+    .legend .l-lost::before { color: var(--red); }
+    .legend .l-orphaned::before { color: var(--amber); }
+    .legend .l-unbound::before { content: "○"; color: var(--grey); }
+
+    /* Scoreboard */
+    .score-rows { display: flex; flex-direction: column; gap: 0.35rem; }
+    .score-row { display: grid; grid-template-columns: 2ch minmax(0, 1fr) auto; gap: 0.7rem; align-items: center; }
+    .score-row .rank { color: var(--muted); font-size: 0.8rem; text-align: right; }
+    .score-row .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .score-row .bar { height: 3px; background: var(--accent); border-radius: 2px; opacity: 0.55; margin-top: 0.25rem; }
+    .score-row .pts { font-weight: 700; }
+
+    /* Cue console */
+    .cue-form { display: flex; gap: 0.5rem; margin-bottom: 0.7rem; flex-wrap: wrap; }
+    .cue-form input#cue-type { width: 12em; font-family: var(--mono); }
+    .cue-form input#cue-payload { flex: 1; min-width: 12rem; font-family: var(--mono); }
+    .cue-log {
+      max-height: 14rem; overflow-y: auto; font-family: var(--mono); font-size: 0.76rem;
+      background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 0.5rem; padding: 0.5rem 0.6rem;
+    }
+    .cue-log .line { padding: 0.18rem 0; border-bottom: 1px solid var(--border-soft); display: flex; gap: 0.6rem; }
+    .cue-log .line:last-child { border-bottom: none; }
+    .cue-log .t { color: var(--muted); flex-shrink: 0; }
+    .cue-log .type { color: var(--accent); flex-shrink: 0; }
+    .cue-log .body { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Toast */
+    #toast {
+      position: fixed; bottom: 1.2rem; left: 50%; transform: translateX(-50%) translateY(1rem);
+      background: var(--panel); border: 1px solid var(--border); border-radius: 0.6rem;
+      padding: 0.6em 1.2em; opacity: 0; pointer-events: none; transition: all 0.25s ease;
+      z-index: 100; max-width: 40rem;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    #toast.error { border-color: rgba(248, 113, 113, 0.5); color: var(--red); }
   </style>
 </head>
 <body>
-  <section>
-    <h1>Round control</h1>
-    <div class="round-controls">
-      <button onclick="roundAction('start')">Start next round</button>
-      <button onclick="roundAction('close')">Close</button>
-      <button onclick="roundAction('reveal')">Reveal</button>
+  <header>
+    <div class="brand"><span class="dot">●</span> Blackbox Runner <small>show console</small></div>
+    <div class="pills">
+      <span class="pill down" id="pill-tracking">tracking</span>
+      <span class="pill down" id="pill-admin">admin ws</span>
+      <span class="pill down" id="pill-td">cue ws</span>
     </div>
-    <div class="round-status" id="round-status">No round loaded.</div>
-  </section>
+  </header>
 
-  <section>
-    <h1>Floor map</h1>
-    <svg class="floor-map" id="floor-map" viewBox="0 0 100 100"></svg>
-  </section>
+  <main>
+    <section class="card" id="card-round">
+      <div class="card-head"><h2>Round control</h2></div>
+      <div class="round-row">
+        <span class="round-state" id="round-state">idle</span>
+        <div class="round-question idle" id="round-question">No round loaded.</div>
+        <div class="round-countdown mono" id="round-countdown"></div>
+      </div>
+      <div class="round-actions">
+        <button class="primary" id="btn-start">Start next round</button>
+        <button id="btn-close">Close</button>
+        <button id="btn-reveal">Reveal</button>
+        <span class="spacer"></span>
+        <button class="ghost" id="btn-reload">Reload content</button>
+      </div>
+    </section>
 
-  <section>
-    <h1>TD cue stream (/ws/td)</h1>
-    <div class="conn down" id="td-conn">connecting…</div>
-    <div class="cue-form">
-      <input id="cue-type" placeholder="cue type, e.g. ritual_prompt" />
-      <input id="cue-payload" placeholder='payload JSON, e.g. {"player_id":"seat-1"}' />
-      <button onclick="fireCue()">Fire</button>
-    </div>
-    <div class="cue-log" id="cue-log"></div>
-  </section>
+    <section class="card" id="card-board">
+      <div class="card-head">
+        <h2>Binding board</h2>
+        <div class="aux counts" id="counts"></div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Player</th><th>GID</th><th>State</th><th>Seen</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="empty" id="empty" style="display:none">No players yet — waiting for claims.</div>
+    </section>
 
-  <section>
-    <h1>Scoreboard</h1>
-    <div class="scoreboard" id="scoreboard"></div>
-  </section>
+    <section class="card" id="card-map">
+      <div class="card-head"><h2>Floor map</h2></div>
+      <svg class="floor-map" id="floor-map" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
+        <g id="zone-layer"></g>
+        <g id="dot-layer"></g>
+      </svg>
+      <div class="legend">
+        <span class="l-bound">bound</span>
+        <span class="l-lost">lost (last seen)</span>
+        <span class="l-orphaned">orphaned</span>
+        <span class="l-unbound">unbound GID</span>
+      </div>
+    </section>
 
-  <section>
-    <h1>Binding board</h1>
-    <div class="conn down" id="conn">connecting…</div>
-    <table>
-      <thead>
-        <tr><th>Player</th><th>GID</th><th>State</th><th>Last seen</th><th>Rebind</th></tr>
-      </thead>
-      <tbody id="rows"></tbody>
-    </table>
-    <div class="empty" id="empty" style="display:none">No players yet.</div>
-  </section>
+    <section class="card" id="card-scores">
+      <div class="card-head"><h2>Scoreboard</h2></div>
+      <div class="score-rows" id="scoreboard"></div>
+      <div class="empty" id="scores-empty">No scores yet.</div>
+    </section>
+
+    <section class="card" id="card-cues">
+      <div class="card-head"><h2>Cue console <small style="color:var(--muted); text-transform:none; letter-spacing:0">— /ws/td</small></h2></div>
+      <div class="cue-form">
+        <input id="cue-type" placeholder="cue type, e.g. ritual_prompt" />
+        <input id="cue-payload" placeholder='payload JSON, e.g. {"player_id":"seat-1"}' />
+        <button class="primary" id="btn-cue">Fire</button>
+      </div>
+      <div class="cue-log" id="cue-log"></div>
+    </section>
+  </main>
+
+  <div id="toast"></div>
 
   <script>
-    const players = new Map();
-    const rowsEl = document.getElementById("rows");
-    const emptyEl = document.getElementById("empty");
-    const connEl = document.getElementById("conn");
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) =>
+      String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-    function fmtAgo(ts) {
-      if (!ts) return "—";
-      const secs = Math.max(0, (Date.now() / 1000) - ts);
-      return secs < 1 ? "now" : `${secs.toFixed(0)}s ago`;
+    let toastTimer = null;
+    function toast(msg, isError = false) {
+      const el = $("toast");
+      el.textContent = msg;
+      el.className = isError ? "show error" : "show";
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { el.className = ""; }, 4000);
     }
 
-    function render() {
-      const list = [...players.values()].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-      emptyEl.style.display = list.length ? "none" : "block";
-      rowsEl.innerHTML = list.map((p) => `
-        <tr>
-          <td>${p.id}${p.display_name ? ` <span style="opacity:.5">(${p.display_name})</span>` : ""}</td>
-          <td>${p.gid ?? "—"}</td>
-          <td><span class="state ${p.state}">${p.state}</span></td>
-          <td>${fmtAgo(p.last_seen_at)}</td>
-          <td>
-            <input class="rebind-gid" type="number" placeholder="gid" id="rebind-${p.id}" />
-            <button onclick="rebind('${p.id}')">Rebind</button>
-            ${p.state === "lost" || p.state === "orphaned"
-              ? `<button class="ritual-btn" onclick="sendToRitual('${p.id}')">Send to ritual</button>`
-              : ""}
-          </td>
-        </tr>
-      `).join("");
-      renderFloorMap(list);
-    }
-
-    function renderFloorMap(list) {
-      const svg = document.getElementById("floor-map");
-      const dots = list
-        .filter((p) => p.last_seen_x != null && p.last_seen_y != null)
-        .map((p) => {
-          const x = (p.last_seen_x * 100).toFixed(1);
-          const y = (p.last_seen_y * 100).toFixed(1);
-          return `
-            <g>
-              <circle class="${p.state}" cx="${x}" cy="${y}" r="2.2"><title>${p.id} (${p.state}, gid ${p.gid ?? "—"})</title></circle>
-              <text x="${x}" y="${Number(y) - 3}" text-anchor="middle">${p.id}</text>
-            </g>
-          `;
-        })
-        .join("");
-      svg.innerHTML = dots;
-    }
-
-    window.sendToRitual = async function (playerId) {
-      const resp = await fetch("/api/admin/cues/ritual_prompt", {
+    async function post(url, body) {
+      const resp = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payload: { player_id: playerId, corner_zone: "ritual" } }),
+        body: body === undefined ? undefined : JSON.stringify(body),
       });
       if (!resp.ok) {
-        const body = await resp.json().catch(() => ({}));
-        alert(body.detail || `cue failed (${resp.status})`);
+        const detail = (await resp.json().catch(() => ({}))).detail;
+        throw new Error(detail || `request failed (${resp.status})`);
       }
-    };
+      return resp.json();
+    }
 
-    window.rebind = async function (playerId) {
-      const input = document.getElementById(`rebind-${playerId}`);
+    function setPill(id, ok, label) {
+      const el = $(id);
+      el.className = `pill ${ok ? "ok" : "down"}`;
+      el.textContent = label;
+    }
+
+    // ---------------------------------------------------------------- //
+    // Binding board — rows are created once and updated in place, so the
+    // rebind input an operator is typing into never gets wiped by a render.
+    // ---------------------------------------------------------------- //
+    const players = new Map(); // id -> player object
+    const rowEls = new Map();  // id -> { tr, gidCell, stateEl, seenCell, ritualBtn }
+    const cmp = new Intl.Collator(undefined, { numeric: true }).compare;
+
+    function createRow(p) {
+      const tr = document.createElement("tr");
+      tr.dataset.playerId = p.id;
+
+      const nameCell = document.createElement("td");
+      nameCell.textContent = p.id;
+      if (p.display_name) {
+        const note = document.createElement("span");
+        note.className = "name-note";
+        note.textContent = ` (${p.display_name})`;
+        nameCell.appendChild(note);
+      }
+
+      const gidCell = document.createElement("td");
+      gidCell.className = "mono";
+
+      const stateCell = document.createElement("td");
+      const stateEl = document.createElement("span");
+      stateCell.appendChild(stateEl);
+
+      const seenCell = document.createElement("td");
+      seenCell.className = "mono";
+
+      const actionsCell = document.createElement("td");
+      const actions = document.createElement("div");
+      actions.className = "row-actions";
+      const input = document.createElement("input");
+      input.className = "rebind-gid";
+      input.type = "text";
+      input.inputMode = "numeric";
+      input.placeholder = "gid";
+      const rebindBtn = document.createElement("button");
+      rebindBtn.className = "small";
+      rebindBtn.textContent = "Rebind";
+      rebindBtn.addEventListener("click", () => rebind(p.id, input));
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") rebind(p.id, input); });
+      const ritualBtn = document.createElement("button");
+      ritualBtn.className = "small ritual";
+      ritualBtn.textContent = "Send to ritual";
+      ritualBtn.hidden = true;
+      ritualBtn.addEventListener("click", () => sendToRitual(p.id));
+      actions.append(input, rebindBtn, ritualBtn);
+      actionsCell.appendChild(actions);
+
+      tr.append(nameCell, gidCell, stateCell, seenCell, actionsCell);
+
+      // Insert keeping rows sorted by player id (ids never change, so rows
+      // never move after insertion — focus and typed input stay intact).
+      const rows = $("rows");
+      const next = [...rows.children].find((el) => cmp(p.id, el.dataset.playerId) < 0);
+      rows.insertBefore(tr, next || null);
+
+      const refs = { tr, gidCell, stateEl, seenCell, ritualBtn };
+      rowEls.set(p.id, refs);
+      return refs;
+    }
+
+    function updateRow(p) {
+      const refs = rowEls.get(p.id) || createRow(p);
+      refs.gidCell.textContent = p.gid ?? "—";
+      refs.stateEl.className = `state ${p.state}`;
+      refs.stateEl.textContent = p.state;
+      refs.tr.dataset.lastSeenAt = p.last_seen_at ?? "";
+      refs.tr.dataset.state = p.state;
+      refs.ritualBtn.hidden = !(p.state === "lost" || p.state === "orphaned");
+      refreshSeenCell(p.id);
+    }
+
+    function refreshSeenCell(playerId) {
+      const refs = rowEls.get(playerId);
+      const p = players.get(playerId);
+      if (!refs || !p) return;
+      if (p.state === "bound" && p.gid != null && liveGids.has(p.gid)) {
+        refs.seenCell.textContent = "live";
+        return;
+      }
+      if (!p.last_seen_at) { refs.seenCell.textContent = "—"; return; }
+      const secs = Math.max(0, Date.now() / 1000 - p.last_seen_at);
+      refs.seenCell.textContent = secs < 1 ? "now" : `${secs.toFixed(0)}s ago`;
+    }
+
+    function renderCounts() {
+      const counts = {};
+      for (const p of players.values()) counts[p.state] = (counts[p.state] || 0) + 1;
+      $("counts").innerHTML = ["bound", "lost", "orphaned", "unclaimed"]
+        .filter((s) => counts[s])
+        .map((s) => `<span class="count-chip ${s}"><b>${counts[s]}</b> ${s}</span>`)
+        .join("");
+      $("empty").style.display = players.size ? "none" : "block";
+    }
+
+    async function rebind(playerId, input) {
       const gid = parseInt(input.value, 10);
       if (!Number.isFinite(gid)) return;
-      const resp = await fetch(`/api/admin/players/${encodeURIComponent(playerId)}/rebind`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gid }),
-      });
-      if (!resp.ok) {
-        const body = await resp.json().catch(() => ({}));
-        alert(body.detail || `rebind failed (${resp.status})`);
+      try {
+        await post(`/api/admin/players/${encodeURIComponent(playerId)}/rebind`, { gid });
+        input.value = "";
+        toast(`Rebound ${playerId} to gid ${gid}`);
+      } catch (err) {
+        toast(err.message, true);
       }
-    };
+    }
 
-    function connect() {
+    async function sendToRitual(playerId) {
+      try {
+        await post("/api/admin/cues/ritual_prompt", { payload: { player_id: playerId, corner_zone: "ritual" } });
+        toast(`Ritual prompt sent to ${playerId}`);
+      } catch (err) {
+        toast(err.message, true);
+      }
+    }
+
+    // ---------------------------------------------------------------- //
+    // Floor map: zone outlines (fetched once) + live dots.
+    // Bound players use the live audience position for their GID when
+    // available; lost/orphaned players show at their last-seen spot.
+    // ---------------------------------------------------------------- //
+    let audience = [];
+    let liveGids = new Set();
+
+    async function loadZones() {
+      try {
+        const resp = await fetch("/api/tracking/zones");
+        if (!resp.ok) throw new Error();
+        const map = await resp.json();
+        $("zone-layer").innerHTML = (map.zones || [])
+          .map((z) => {
+            const pts = (z.points || []).map(([x, y]) => `${(x * 100).toFixed(1)},${(y * 100).toFixed(1)}`).join(" ");
+            if (!pts) return "";
+            const cx = z.points.reduce((s, [x]) => s + x, 0) / z.points.length;
+            const cy = z.points.reduce((s, [, y]) => s + y, 0) / z.points.length;
+            return `<polygon class="zone" points="${pts}"></polygon>
+              <text class="zone-label" x="${(cx * 100).toFixed(1)}" y="${(cy * 100).toFixed(1)}" text-anchor="middle">${esc(z.id)}</text>`;
+          })
+          .join("");
+      } catch (err) {
+        setTimeout(loadZones, 5000); // TrackingBox may not be up yet
+      }
+    }
+
+    async function refreshAudience() {
+      try {
+        const resp = await fetch("/api/tracking/audience");
+        if (!resp.ok) return;
+        audience = await resp.json();
+        liveGids = new Set(audience.filter((a) => a.visible).map((a) => a.gid));
+      } catch (err) { /* keep last known */ }
+    }
+
+    function drawDots() {
+      const byGid = new Map(audience.map((a) => [a.gid, a]));
+      const boundGids = new Set();
+      const parts = [];
+
+      for (const p of players.values()) {
+        let x = p.last_seen_x, y = p.last_seen_y;
+        if (p.state === "bound" && p.gid != null) {
+          boundGids.add(p.gid);
+          const live = byGid.get(p.gid);
+          if (live && live.floor) [x, y] = live.floor;
+        }
+        if (x == null || y == null) continue;
+        const cx = (x * 100).toFixed(1), cy = (y * 100).toFixed(1);
+        parts.push(`<g>
+          <circle class="${esc(p.state)}" cx="${cx}" cy="${cy}" r="2"><title>${esc(p.id)} (${esc(p.state)}, gid ${p.gid ?? "—"})</title></circle>
+          <text class="p-label" x="${cx}" y="${(cy - 3.2).toFixed(1)}" text-anchor="middle">${esc(p.id)}</text>
+        </g>`);
+      }
+
+      for (const a of audience) {
+        if (!a.visible || boundGids.has(a.gid) || !a.floor) continue;
+        const cx = (a.floor[0] * 100).toFixed(1), cy = (a.floor[1] * 100).toFixed(1);
+        parts.push(`<g>
+          <circle class="unbound" cx="${cx}" cy="${cy}" r="1.6"><title>gid ${a.gid} (unbound)</title></circle>
+          <text class="gid-label" x="${cx}" y="${(Number(cy) - 2.6).toFixed(1)}" text-anchor="middle">${a.gid}</text>
+        </g>`);
+      }
+
+      $("dot-layer").innerHTML = parts.join("");
+    }
+
+    // ---------------------------------------------------------------- //
+    // Round control
+    // ---------------------------------------------------------------- //
+    let currentRound = null;
+
+    function renderRoundCard() {
+      const stateEl = $("round-state");
+      const qEl = $("round-question");
+      if (!currentRound) {
+        stateEl.className = "round-state";
+        stateEl.textContent = "idle";
+        qEl.className = "round-question idle";
+        qEl.textContent = "No round loaded.";
+        $("round-countdown").textContent = "";
+        return;
+      }
+      stateEl.className = `round-state ${currentRound.state}`;
+      stateEl.textContent = currentRound.state;
+      qEl.className = "round-question";
+      qEl.textContent = `${currentRound.index + 1}. ${currentRound.question}`;
+      tickCountdown();
+    }
+
+    function tickCountdown() {
+      const el = $("round-countdown");
+      const r = currentRound;
+      if (!r) { el.textContent = ""; return; }
+      el.className = "round-countdown mono";
+      if (r.state === "active" && r.opened_at) {
+        const secs = Math.max(0, Math.ceil(r.opened_at + r.duration_s - Date.now() / 1000));
+        el.textContent = `${secs}s`;
+      } else if (r.state === "closing") {
+        el.classList.add("grace");
+        el.textContent = "grace window";
+      } else {
+        el.textContent = "";
+      }
+    }
+
+    async function roundAction(action, label) {
+      try {
+        await post(`/api/admin/rounds/${action}`);
+        toast(label);
+      } catch (err) {
+        toast(err.message, true);
+      }
+      refreshRound();
+    }
+    $("btn-start").addEventListener("click", () => roundAction("start", "Round started"));
+    $("btn-close").addEventListener("click", () => roundAction("close", "Round closed — grace window running"));
+    $("btn-reveal").addEventListener("click", () => roundAction("reveal", "Revealed"));
+    $("btn-reload").addEventListener("click", async () => {
+      try {
+        const res = await post("/api/admin/content/reload");
+        toast(`Content reloaded — ${res.rounds} round(s)`);
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+
+    async function refreshRound() {
+      try {
+        const resp = await fetch("/api/rounds/current");
+        currentRound = resp.ok ? await resp.json() : null;
+        renderRoundCard();
+      } catch (err) { /* try again next tick */ }
+    }
+
+    // ---------------------------------------------------------------- //
+    // Scoreboard
+    // ---------------------------------------------------------------- //
+    async function refreshScores() {
+      try {
+        const resp = await fetch("/api/scores");
+        const scores = resp.ok ? await resp.json() : {};
+        const entries = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+        $("scores-empty").style.display = entries.length ? "none" : "block";
+        const max = entries.length ? entries[0][1] : 1;
+        $("scoreboard").innerHTML = entries
+          .map(([id, pts], i) => `
+            <div class="score-row">
+              <span class="rank mono">${i + 1}</span>
+              <span class="who">${esc(id)}<div class="bar" style="width:${Math.max(2, (pts / max) * 100)}%"></div></span>
+              <span class="pts mono">${pts}</span>
+            </div>`)
+          .join("");
+      } catch (err) { /* try again next tick */ }
+    }
+
+    // ---------------------------------------------------------------- //
+    // WebSockets: admin roster + TD cue stream
+    // ---------------------------------------------------------------- //
+    function connectAdmin() {
       const proto = location.protocol === "https:" ? "wss" : "ws";
       const ws = new WebSocket(`${proto}://${location.host}/ws/admin`);
-      ws.onopen = () => { connEl.textContent = "connected"; connEl.className = "conn ok"; };
+      ws.onopen = () => setPill("pill-admin", true, "admin ws");
       ws.onclose = () => {
-        connEl.textContent = "disconnected — retrying…";
-        connEl.className = "conn down";
-        setTimeout(connect, 1500);
+        setPill("pill-admin", false, "admin ws — retrying");
+        setTimeout(connectAdmin, 1500);
       };
       ws.onmessage = (evt) => {
         const msg = JSON.parse(evt.data);
         if (msg.type === "roster") {
           players.clear();
           for (const p of msg.players) players.set(p.id, p);
+          for (const [id, refs] of rowEls) {
+            if (!players.has(id)) { refs.tr.remove(); rowEls.delete(id); }
+          }
+          for (const p of players.values()) updateRow(p);
         } else if (msg.type === "player_update") {
           players.set(msg.player.id, msg.player);
+          updateRow(msg.player);
         }
-        render();
+        renderCounts();
+        drawDots();
       };
     }
 
-    window.roundAction = async function (action) {
-      const resp = await fetch(`/api/admin/rounds/${action}`, { method: "POST" });
-      if (!resp.ok) {
-        const body = await resp.json().catch(() => ({}));
-        alert(body.detail || `${action} failed (${resp.status})`);
-      }
-      refreshRound();
-    };
-
-    async function refreshRound() {
-      try {
-        const resp = await fetch("/api/rounds/current");
-        const round = resp.ok ? await resp.json() : null;
-        const el = document.getElementById("round-status");
-        if (!round) {
-          el.textContent = "No round loaded.";
-        } else {
-          el.textContent = `[${round.index}] ${round.question} — ${round.state}`;
-        }
-      } catch (err) {
-        // ignore, try again next tick
-      }
-    }
-
-    async function refreshScores() {
-      try {
-        const resp = await fetch("/api/scores");
-        const scores = resp.ok ? await resp.json() : {};
-        const board = document.getElementById("scoreboard");
-        const entries = Object.entries(scores).sort((a, b) => b[1] - a[1]);
-        board.innerHTML = entries.length
-          ? entries.map(([id, pts]) => `<div class="score-chip">${id}: ${pts}</div>`).join("")
-          : `<div class="empty" style="padding:0.5rem 0">No scores yet.</div>`;
-      } catch (err) {
-        // ignore, try again next tick
-      }
-    }
-
-    // ---- TD cue stream, mirrored here for rehearsal/debugging ----
-    const tdConnEl = document.getElementById("td-conn");
-    const cueLogEl = document.getElementById("cue-log");
+    const ROUND_EVENTS = new Set(["round_opened", "round_closing", "answers_locked", "reveal"]);
 
     function logCue(msg) {
       const line = document.createElement("div");
-      const time = new Date().toLocaleTimeString();
-      line.textContent = `${time}  ${msg.type}  ${JSON.stringify(msg)}`;
-      cueLogEl.prepend(line);
-      while (cueLogEl.childElementCount > 50) cueLogEl.removeChild(cueLogEl.lastChild);
+      line.className = "line";
+      const t = document.createElement("span");
+      t.className = "t";
+      t.textContent = new Date().toLocaleTimeString();
+      const type = document.createElement("span");
+      type.className = "type";
+      type.textContent = msg.type;
+      const body = document.createElement("span");
+      body.className = "body";
+      const { type: _ignored, ...rest } = msg;
+      body.textContent = JSON.stringify(rest);
+      line.append(t, type, body);
+      const logEl = $("cue-log");
+      logEl.prepend(line);
+      while (logEl.childElementCount > 50) logEl.removeChild(logEl.lastChild);
     }
 
     function connectTd() {
       const proto = location.protocol === "https:" ? "wss" : "ws";
       const ws = new WebSocket(`${proto}://${location.host}/ws/td`);
-      ws.onopen = () => { tdConnEl.textContent = "connected"; tdConnEl.className = "conn ok"; };
+      ws.onopen = () => setPill("pill-td", true, "cue ws");
       ws.onclose = () => {
-        tdConnEl.textContent = "disconnected — retrying…";
-        tdConnEl.className = "conn down";
+        setPill("pill-td", false, "cue ws — retrying");
         setTimeout(connectTd, 1500);
       };
-      ws.onmessage = (evt) => logCue(JSON.parse(evt.data));
+      ws.onmessage = (evt) => {
+        const msg = JSON.parse(evt.data);
+        logCue(msg);
+        if (ROUND_EVENTS.has(msg.type)) refreshRound();
+        if (msg.type === "scores_updated") refreshScores();
+      };
     }
 
-    window.fireCue = async function () {
-      const cueType = document.getElementById("cue-type").value.trim();
+    $("btn-cue").addEventListener("click", async () => {
+      const cueType = $("cue-type").value.trim();
       if (!cueType) return;
-      const rawPayload = document.getElementById("cue-payload").value.trim();
+      const rawPayload = $("cue-payload").value.trim();
       let payload = {};
       if (rawPayload) {
         try {
           payload = JSON.parse(rawPayload);
         } catch (err) {
-          alert("payload must be valid JSON");
+          toast("payload must be valid JSON", true);
           return;
         }
       }
-      const resp = await fetch(`/api/admin/cues/${encodeURIComponent(cueType)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payload }),
-      });
-      if (!resp.ok) {
-        const body = await resp.json().catch(() => ({}));
-        alert(body.detail || `cue failed (${resp.status})`);
+      try {
+        await post(`/api/admin/cues/${encodeURIComponent(cueType)}`, { payload });
+        toast(`Cue fired: ${cueType}`);
+      } catch (err) {
+        toast(err.message, true);
       }
-    };
+    });
 
-    connect();
+    async function refreshHealth() {
+      try {
+        const resp = await fetch("/health");
+        const health = resp.ok ? await resp.json() : {};
+        setPill("pill-tracking", !!health.tracking_connected, health.tracking_connected ? "tracking" : "tracking down");
+      } catch (err) {
+        setPill("pill-tracking", false, "tracking ?");
+      }
+    }
+
+    // ---------------------------------------------------------------- //
+    connectAdmin();
     connectTd();
+    loadZones();
     refreshRound();
     refreshScores();
-    setInterval(render, 1000); // keep "last seen" timers fresh
+    refreshHealth();
+    refreshAudience();
+    setInterval(() => {
+      for (const id of rowEls.keys()) refreshSeenCell(id);
+      drawDots();
+    }, 1000);
+    setInterval(refreshAudience, 1000);
     setInterval(refreshRound, 2000);
-    setInterval(refreshScores, 2000);
+    setInterval(refreshScores, 3000);
+    setInterval(refreshHealth, 3000);
+    setInterval(tickCountdown, 250);
   </script>
 </body>
 </html>
