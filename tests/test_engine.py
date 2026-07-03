@@ -393,3 +393,48 @@ async def test_load_does_not_repeat_a_recovered_round(db, tracking):
     await recovered.reveal_round()  # finish r1
     rt = await recovered.start_next_round()
     assert rt.content.id == "r2"  # not r1 again
+
+
+# ---------------------------------------------------------------------- #
+# Phase 5: content hot-reload
+# ---------------------------------------------------------------------- #
+
+NEW_SHOW = {
+    "version": "2",
+    "rounds": [
+        {
+            "id": "r1-updated",
+            "question": "Updated question",
+            "type": "majority",
+            "duration_s": 30,
+            "grace_s": 5,
+            "points": 5,
+            "options": [{"zone": "a", "label": "A"}, {"zone": "b", "label": "B"}],
+        }
+    ],
+}
+
+
+@pytest.mark.asyncio
+async def test_reload_show_between_rounds(engine):
+    assert engine.show.rounds[0].id == "r1"
+    engine.reload_show(ShowContent.model_validate(NEW_SHOW))
+    assert engine.show.rounds[0].id == "r1-updated"
+    assert len(engine.show.rounds) == 1
+
+
+@pytest.mark.asyncio
+async def test_reload_show_refused_mid_round(engine):
+    await engine.start_next_round()
+    with pytest.raises(EngineError):
+        engine.reload_show(ShowContent.model_validate(NEW_SHOW))
+    assert engine.show.rounds[0].id == "r1"  # unchanged
+
+
+@pytest.mark.asyncio
+async def test_reload_show_allowed_after_round_done(engine):
+    await engine.start_next_round()
+    await engine.close_round()
+    await engine.reveal_round()
+    engine.reload_show(ShowContent.model_validate(NEW_SHOW))
+    assert engine.show.rounds[0].id == "r1-updated"

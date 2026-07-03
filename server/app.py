@@ -252,6 +252,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         engine: GameEngine = app.state.engine
         return await engine.scores() if engine else {}
 
+    @app.post("/api/admin/content/reload")
+    async def reload_content() -> dict:
+        """Hot-reload content/show.yaml between rounds (docs/runbook.md's
+        content freeze process covers when this is and isn't safe to use).
+        """
+        try:
+            show = await asyncio.to_thread(
+                load_show, settings.content_path, valid_zone_ids=app.state.zones.zone_ids()
+            )
+        except ContentError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            app.state.engine.reload_show(show)
+        except EngineError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        app.state.show = show
+        return {"ok": True, "rounds": len(show.rounds)}
+
     @app.post("/api/admin/rounds/start")
     async def start_round() -> dict:
         try:

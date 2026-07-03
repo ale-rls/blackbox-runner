@@ -329,3 +329,21 @@ class Database:
                 (session_id,),
             ).fetchall()
             return {row["player_id"]: row["total"] for row in rows}
+
+    def load_score_events(self, session_id: int) -> list[ScoreEventRow]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, session_id, player_id, round_id, points, reason, at "
+                "FROM score_events WHERE session_id = ? ORDER BY id",
+                (session_id,),
+            ).fetchall()
+            return [ScoreEventRow(**dict(row)) for row in rows]
+
+    # ------------------------------------------------------------------ #
+    # Sessions (listing, for replay/reporting tools)
+    # ------------------------------------------------------------------ #
+    def list_sessions(self) -> list[sqlite3.Row]:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT id, started_at, content_version, status FROM sessions ORDER BY id"
+            ).fetchall()

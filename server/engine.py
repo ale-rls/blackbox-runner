@@ -201,6 +201,20 @@ class GameEngine:
                 counts[zone] += 1
         return counts
 
+    def reload_show(self, show: ShowContent) -> None:
+        """Hot-reload content (docs/architecture.md §3). Only safe between
+        rounds — refused while one is in flight, since ``_index`` is a
+        position into ``show.rounds`` and swapping the list out from under
+        an active round could change what "the current round" even means.
+        A full content freeze ahead of the show is still the right process
+        for anything that touches rounds already played; see
+        docs/runbook.md.
+        """
+        if self._current is not None and self._current.state != RoundState.DONE:
+            raise EngineError("cannot reload content while a round is in progress")
+        self.show = show
+        log.info("Reloaded show content: %d round(s)", len(show.rounds))
+
     # ------------------------------------------------------------------ #
     # Round control
     # ------------------------------------------------------------------ #
