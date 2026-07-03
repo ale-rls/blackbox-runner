@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Theater Game — Binding Board</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; padding: 1.5rem;
+      background: #0b0b12; color: #f4f4f8;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    h1 { font-size: 1.2rem; margin: 0 0 1rem; }
+    .conn { font-size: 0.85rem; opacity: 0.7; margin-bottom: 1rem; }
+    .conn.ok { color: #4ade80; }
+    .conn.down { color: #f87171; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+    th, td { text-align: left; padding: 0.5rem 0.7rem; border-bottom: 1px solid #26262f; }
+    th { opacity: 0.6; font-weight: 500; text-transform: uppercase; font-size: 0.75rem; }
+    .state { padding: 0.15rem 0.5rem; border-radius: 0.4rem; font-size: 0.8rem; font-weight: 600; }
+    .state.bound { background: #16321f; color: #4ade80; }
+    .state.lost { background: #351818; color: #f87171; }
+    .state.unclaimed { background: #33291a; color: #fbbf24; }
+    .state.orphaned { background: #33291a; color: #fbbf24; }
+    .state.left { background: #222; color: #999; }
+    input.rebind-gid { width: 5em; background: #16161f; border: 1px solid #444; color: inherit; padding: 0.2em 0.4em; border-radius: 0.3em; }
+    button { background: #5b6bf6; color: white; border: none; padding: 0.3em 0.8em; border-radius: 0.3em; cursor: pointer; }
+    .empty { opacity: 0.5; padding: 2rem 0; text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>Binding board</h1>
+  <div class="conn down" id="conn">connecting…</div>
+  <table>
+    <thead>
+      <tr><th>Player</th><th>GID</th><th>State</th><th>Last seen</th><th>Rebind</th></tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="empty" id="empty" style="display:none">No players yet.</div>
+
+  <script>
+    const players = new Map();
+    const rowsEl = document.getElementById("rows");
+    const emptyEl = document.getElementById("empty");
+    const connEl = document.getElementById("conn");
+
+    function fmtAgo(ts) {
+      if (!ts) return "—";
+      const secs = Math.max(0, (Date.now() / 1000) - ts);
+      return secs < 1 ? "now" : `${secs.toFixed(0)}s ago`;
+    }
+
+    function render() {
+      const list = [...players.values()].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+      emptyEl.style.display = list.length ? "none" : "block";
+      rowsEl.innerHTML = list.map((p) => `
+        <tr>
+          <td>${p.id}${p.display_name ? ` <span style="opacity:.5">(${p.display_name})</span>` : ""}</td>
+          <td>${p.gid ?? "—"}</td>
+          <td><span class="state ${p.state}">${p.state}</span></td>
+          <td>${fmtAgo(p.last_seen_at)}</td>
+          <td>
+            <input class="rebind-gid" type="number" placeholder="gid" id="rebind-${p.id}" />
+            <button onclick="rebind('${p.id}')">Rebind</button>
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    window.rebind = async function (playerId) {
+      const input = document.getElementById(`rebind-${playerId}`);
+      const gid = parseInt(input.value, 10);
+      if (!Number.isFinite(gid)) return;
+      const resp = await fetch(`/api/admin/players/${encodeURIComponent(playerId)}/rebind`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gid }),
+      });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        alert(body.detail || `rebind failed (${resp.status})`);
+      }
+    };
+
+    function connect() {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${proto}://${location.host}/ws/admin`);
+      ws.onopen = () => { connEl.textContent = "connected"; connEl.className = "conn ok"; };
+      ws.onclose = () => {
+        connEl.textContent = "disconnected — retrying…";
+        connEl.className = "conn down";
+        setTimeout(connect, 1500);
+      };
+      ws.onmessage = (evt) => {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === "roster") {
+          players.clear();
+          for (const p of msg.players) players.set(p.id, p);
+        } else if (msg.type === "player_update") {
+          players.set(msg.player.id, msg.player);
+        }
+        render();
+      };
+    }
+
+    connect();
+    setInterval(render, 1000); // keep "last seen" timers fresh
+  </script>
+</body>
+</html>

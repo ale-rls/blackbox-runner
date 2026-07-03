@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Claim your dot</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 1.5rem;
+      background: #0b0b12; color: #f4f4f8;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: 1.5rem; text-align: center;
+    }
+    h1 { font-size: 1.4rem; margin: 0; }
+    .player-id { font-size: 1rem; opacity: 0.6; }
+    input {
+      font-size: 2.5rem; text-align: center; width: 6ch; padding: 0.4em;
+      border-radius: 0.5rem; border: 2px solid #444; background: #16161f; color: inherit;
+    }
+    button {
+      font-size: 1.2rem; padding: 0.8em 1.6em; border-radius: 0.6rem; border: none;
+      background: #5b6bf6; color: white; font-weight: 600;
+    }
+    button:disabled { opacity: 0.5; }
+    .state { font-size: 1.5rem; font-weight: 600; }
+    .state.bound { color: #4ade80; }
+    .state.lost { color: #f87171; }
+    .state.unclaimed { color: #fbbf24; }
+    .error { color: #f87171; min-height: 1.4em; }
+  </style>
+</head>
+<body>
+  <h1>Enter the number on your dot</h1>
+  <div class="player-id" id="player-id"></div>
+  <div class="state lost" id="lost-banner" style="display:none">Lost — type your new number, or wait for an usher</div>
+  <div id="claim-form">
+    <input id="gid" inputmode="numeric" pattern="[0-9]*" maxlength="5" autofocus />
+    <div class="error" id="error"></div>
+    <button id="submit">Claim</button>
+  </div>
+  <div id="status" style="display:none">
+    <div>You are <strong id="gid-display"></strong></div>
+    <div class="state" id="state-display"></div>
+  </div>
+
+  <script>
+    const playerId = decodeURIComponent(location.pathname.split("/").filter(Boolean).pop());
+    document.getElementById("player-id").textContent = `Player ${playerId}`;
+
+    const form = document.getElementById("claim-form");
+    const statusEl = document.getElementById("status");
+    const errorEl = document.getElementById("error");
+    const gidInput = document.getElementById("gid");
+    const submitBtn = document.getElementById("submit");
+
+    async function claim() {
+      const gid = parseInt(gidInput.value, 10);
+      if (!Number.isFinite(gid)) {
+        errorEl.textContent = "Enter the number you were shown.";
+        return;
+      }
+      submitBtn.disabled = true;
+      errorEl.textContent = "";
+      try {
+        const resp = await fetch(`/api/players/${encodeURIComponent(playerId)}/claim`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ gid }),
+        });
+        if (!resp.ok) {
+          const body = await resp.json().catch(() => ({}));
+          throw new Error(body.detail || `claim failed (${resp.status})`);
+        }
+        render(await resp.json());
+      } catch (err) {
+        errorEl.textContent = err.message;
+      } finally {
+        submitBtn.disabled = false;
+      }
+    }
+
+    function render(player) {
+      const lostBanner = document.getElementById("lost-banner");
+      if (player.state === "bound") {
+        form.style.display = "none";
+        lostBanner.style.display = "none";
+        statusEl.style.display = "block";
+        document.getElementById("gid-display").textContent = `#${player.gid}`;
+        const stateEl = document.getElementById("state-display");
+        stateEl.textContent = "Connected";
+        stateEl.className = "state bound";
+      } else if (player.state === "lost") {
+        // Backend allows self-service re-claim from "lost", so keep the
+        // form visible — most players just need to retype their new number.
+        form.style.display = "block";
+        lostBanner.style.display = "block";
+        statusEl.style.display = "none";
+      } else {
+        form.style.display = "block";
+        lostBanner.style.display = "none";
+        statusEl.style.display = "none";
+      }
+    }
+
+    async function poll() {
+      try {
+        const resp = await fetch(`/api/players/${encodeURIComponent(playerId)}`);
+        if (resp.ok) render(await resp.json());
+      } catch (err) {
+        // network hiccup: keep last known UI, try again next tick
+      }
+    }
+
+    submitBtn.addEventListener("click", claim);
+    gidInput.addEventListener("keydown", (e) => { if (e.key === "Enter") claim(); });
+    poll();
+    setInterval(poll, 3000);
+  </script>
+</body>
+</html>
