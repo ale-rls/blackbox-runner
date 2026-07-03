@@ -314,3 +314,82 @@ async def test_zone_counts_broadcast_stops_after_close(engine, bindings, trackin
     # No more zone_counts should arrive once the round is no longer active.
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(queue.get(), timeout=0.2)
+
+
+# ---------------------------------------------------------------------- #
+# Phase 4: round-state crash recovery
+# ---------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_load_with_no_rounds_starts_fresh(db, tracking):
+    session_id = db.create_session()
+    bindings = await BindingManager.load(db, session_id, tracking)
+    show = ShowContent.model_validate(SHOW)
+    engine = await GameEngine.load(db, session_id, show, bindings, tracking)
+    assert engine.current is None
+    assert engine.has_more_rounds
+
+
+@pytest.mark.asyncio
+async def test_load_resumes_after_a_fully_done_round(db, tracking):
+    session_id = db.create_session()
+    bindings = await BindingManager.load(db, session_id, tracking)
+    show = ShowContent.model_validate(SHOW)
+
+    engine = GameEngine(db, session_id, show, bindings, tracking)
+    await engine.start_next_round()
+    await engine.close_round()
+    await engine.reveal_round()
+
+    recovered = await GameEngine.load(db, session_id, show, bindings, tracking)
+    assert recovered.current is None
+    # Starting the next round should pick up r2, not repeat r1.
+    rt = await recovered.start_next_round()
+    assert rt.content.id == "r2"
+
+
+@pytest.mark.asyncio
+async def test_load_recovers_mid_round_as_closing_with_answers_preserved(db, tracking):
+    session_id = db.create_session()
+    bindings = await BindingManager.load(db, session_id, tracking)
+    show = ShowContent.model_validate(SHOW)
+
+    engine = GameEngine(db, session_id, show, bindings, tracking)
+    await _claim_bound(bindings, tracking, "p1", 1, "a")
+    await _claim_bound(bindings, tracking, "p2", 2, "a")
+    await _claim_bound(bindings, tracking, "p3", 3, "b")
+    await engine.start_next_round()
+    await engine.close_round()  # crash happens here, before reveal
+
+    recovered = await GameEngine.load(db, session_id, show, bindings, tracking)
+    assert recovered.current is not None
+    assert recovered.current.state == RoundState.CLOSING
+    assert recovered.current.content.id == "r1"
+    assert recovered.current.answers["p1"] == ("a", "answered")
+    assert recovered.current.answers["p2"] == ("a", "answered")
+    assert recovered.current.answers["p3"] == ("b", "answered")
+
+    # No answers were lost, and an operator can still finish the round.
+    rt = await recovered.reveal_round()
+    assert rt.state == RoundState.DONE
+    scores = await recovered.scores()
+    assert scores.get("p1") == 10
+    assert scores.get("p2") == 10
+    assert "p3" not in scores or scores["p3"] == 0
+
+
+@pytest.mark.asyncio
+async def test_load_does_not_repeat_a_recovered_round(db, tracking):
+    session_id = db.create_session()
+    bindings = await BindingManager.load(db, session_id, tracking)
+    show = ShowContent.model_validate(SHOW)
+
+    engine = GameEngine(db, session_id, show, bindings, tracking)
+    await engine.start_next_round()  # r1
+    await engine.close_round()
+
+    recovered = await GameEngine.load(db, session_id, show, bindings, tracking)
+    await recovered.reveal_round()  # finish r1
+    rt = await recovered.start_next_round()
+    assert rt.content.id == "r2"  # not r1 again

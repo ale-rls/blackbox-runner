@@ -2,8 +2,10 @@
 
 Phase 0 connected to TrackingBox and mirrored its audience state. Phase 1
 added the player<->GID binding layer: claim flow, persisted state with crash
-recovery, and a minimal admin binding board. Phase 2 adds the round/scoring
-engine and the player WebSocket. The TouchDesigner WS lands in Phase 3.
+recovery, and a minimal admin binding board. Phase 2 added the round/scoring
+engine and the player WebSocket. Phase 3 added the TouchDesigner round/cue
+WS. Phase 4 adds auto-rebind, the ritual rebind flow, and round-state crash
+recovery on top of Phase 1's binding-state recovery.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .bindings import BindingError, BindingManager
+from .bindings import BindingError, BindingManager, PlayerState
 from .config import Settings
 from .content import ContentError, ShowContent, load_show
 from .engine import EngineError, GameEngine
@@ -49,6 +51,28 @@ def _sample(people: dict) -> str:
         return ""
     gid, state = next(iter(people.items()))
     return f" (e.g. gid={gid} floor={state.floor} zone={state.zone})"
+
+
+async def _watch_for_ritual_prompts(
+    bindings: BindingManager, engine: GameEngine, ritual_zone_id: Optional[str]
+) -> None:
+    """Bridges bindings.py's orphan transitions to the TD/player cue channel.
+
+    Kept out of bindings.py to avoid coupling the binding state machine to
+    the round engine's pub/sub — this is the one place both are in scope.
+    """
+    if ritual_zone_id is None:
+        return
+    queue = bindings.subscribe()
+    try:
+        while True:
+            player = await queue.get()
+            if player.state == PlayerState.ORPHANED:
+                engine.publish_cue(
+                    "ritual_prompt", {"player_id": player.id, "corner_zone": ritual_zone_id}
+                )
+    finally:
+        bindings.unsubscribe(queue)
 
 
 class ClaimRequest(BaseModel):
@@ -97,7 +121,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             log.info("Started new session %d", session_id)
         else:
             log.info("Resuming session %d (crash recovery)", session_id)
-        bindings = await BindingManager.load(db, session_id, tracking)
+        bindings = await BindingManager.load(
+            db,
+            session_id,
+            tracking,
+            rebind_max_distance=settings.rebind_max_distance,
+            rebind_max_gap_s=settings.rebind_max_gap_s,
+            orphan_after_s=settings.orphan_after_s,
+            ritual_zone_id=settings.ritual_zone_id,
+        )
         app.state.bindings = bindings
         app.state.session_id = session_id
 
@@ -110,16 +142,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             log.warning("Could not load show content (%s); round control disabled", exc)
             show = _EMPTY_SHOW
         app.state.show = show
-        app.state.engine = GameEngine(db, session_id, show, bindings, tracking)
+        app.state.engine = await GameEngine.load(db, session_id, show, bindings, tracking)
 
         bindings_task = asyncio.create_task(bindings.run())
         log_task = asyncio.create_task(_log_positions_periodically(tracking))
+        ritual_task = asyncio.create_task(
+            _watch_for_ritual_prompts(bindings, app.state.engine, settings.ritual_zone_id)
+        )
         try:
             yield
         finally:
             tracking.stop()
             app.state.engine.shutdown()
-            for task in (tracking_task, bindings_task, log_task):
+            bindings.shutdown()
+            for task in (tracking_task, bindings_task, log_task, ritual_task):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task

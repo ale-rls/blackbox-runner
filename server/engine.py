@@ -111,6 +111,66 @@ class GameEngine:
         """
         self._publish(EngineEvent(cue_type, payload or {}))
 
+    @classmethod
+    async def load(
+        cls,
+        db: Database,
+        session_id: int,
+        show: ShowContent,
+        bindings: BindingManager,
+        tracking: TrackingClient,
+        **kwargs,
+    ) -> "GameEngine":
+        """Rebuild engine state after a crash mid-show.
+
+        Recovery contract: if the most recently created round for this
+        session had already finished (``done``), we simply resume from the
+        round *after* it — nothing is lost. If it hadn't finished, we can't
+        safely resume its original timers (we don't know how long the
+        server was down for), so we load it as ``closing`` with whatever
+        answers were already persisted, and leave it for the operator to
+        call reveal — no answers are lost, but the round doesn't silently
+        replay either.
+        """
+        engine = cls(db, session_id, show, bindings, tracking, **kwargs)
+        rows = await asyncio.to_thread(db.load_rounds, session_id)
+        if not rows:
+            return engine
+
+        last = rows[-1]
+        engine._index = last.idx
+        if last.state == RoundState.DONE.value:
+            return engine
+
+        content = next((r for r in show.rounds if r.id == last.question_id), None)
+        if content is None:
+            log.warning(
+                "Recovered round row %d references unknown content id %r; treating as done",
+                last.id,
+                last.question_id,
+            )
+            return engine
+
+        rt = RoundRuntime(content=content, row_id=last.id, index=last.idx)
+        rt.state = RoundState.CLOSING
+        rt.opened_at = last.opened_at
+        rt.closed_at = last.closed_at or time.time()
+        answer_rows = await asyncio.to_thread(db.load_answers, last.id)
+        for row in answer_rows:
+            rt.answers[row.player_id] = (row.zone_id, row.resolved)
+        engine._current = rt
+        await asyncio.to_thread(
+            db.update_round_state, last.id, RoundState.CLOSING.value, rt.opened_at, rt.closed_at
+        )
+        log.warning(
+            "Recovered mid-round state for round %r (index %d) after restart; %d answer(s) "
+            "preserved. An operator must call reveal to finish it.",
+            content.id,
+            last.idx,
+            len(rt.answers),
+        )
+        return engine
+
     # ------------------------------------------------------------------ #
     # Read side
     # ------------------------------------------------------------------ #
@@ -306,6 +366,9 @@ class GameEngine:
         scores = await self.scores()
         self._publish(EngineEvent("scores_updated", {"scores": scores}))
         rt.state = RoundState.DONE
+        await asyncio.to_thread(
+            self._db.update_round_state, rt.row_id, RoundState.DONE.value, rt.opened_at, rt.closed_at
+        )
 
     def _current_zone(self, player) -> Optional[str]:
         if player.state != PlayerState.BOUND or player.gid is None:
