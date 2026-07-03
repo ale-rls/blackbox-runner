@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,10 @@ class Settings:
     position_history_seconds: float = 5.0
     db_path: str = "data/theater-game.db"
     content_path: str = "content/show.yaml"
+    rebind_max_distance: float = 0.15
+    rebind_max_gap_s: float = 8.0
+    orphan_after_s: float = 3.0
+    ritual_zone_id: Optional[str] = None
 
     @classmethod
     def load(cls) -> "Settings":
@@ -40,4 +45,10 @@ class Settings:
             ),
             db_path=os.environ.get("GAME_DB_PATH", cls.db_path),
             content_path=os.environ.get("GAME_CONTENT_PATH", cls.content_path),
+            rebind_max_distance=float(
+                os.environ.get("REBIND_MAX_DISTANCE", cls.rebind_max_distance)
+            ),
+            rebind_max_gap_s=float(os.environ.get("REBIND_MAX_GAP_S", cls.rebind_max_gap_s)),
+            orphan_after_s=float(os.environ.get("ORPHAN_AFTER_S", cls.orphan_after_s)),
+            ritual_zone_id=os.environ.get("RITUAL_ZONE_ID", cls.ritual_zone_id),
         )

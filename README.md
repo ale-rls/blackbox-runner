@@ -87,8 +87,24 @@ unanswerable mid-show) and the admin dashboard at `/admin/`.
 Run tests with `make test`.
 
 Note: TrackingBox's default mock simulator churns GIDs quite aggressively
-(people can disappear and respawn sub-second). That's a good stress test but
-makes manual single-player demos flaky — expect players to bounce into
-`lost` unless you're actively re-claiming. Phase 4's auto-rebind/ritual flow
-is the real fix; for now, favor scripted checks over live clicking when
-verifying binding behavior by hand.
+(people can disappear and respawn sub-second). That's a good stress test —
+it's exactly what Phase 4's auto-rebind exists for — but makes manual
+single-player demos flaky if you're just claiming once and watching; favor
+scripted checks over live clicking when verifying binding behavior by hand.
+
+### Ritual rebind (Phase 4)
+
+Set `RITUAL_ZONE_ID` to enable the ritual rebind flow (an orphaned player —
+lost with no confident auto-rebind after `ORPHAN_AFTER_S` seconds, default
+3 — gets prompted to a lit corner; whichever unbound GID enters that zone
+resolves them). `dev/trackingbox.config.json` defines a `ritual` zone in
+the top-left corner for local testing:
+
+```bash
+RITUAL_ZONE_ID=ritual make dev
+```
+
+Other tunables (see `server/config.py`): `REBIND_MAX_DISTANCE` (normalized
+floor units, default 0.15), `REBIND_MAX_GAP_S` (default 8.0). These are
+exactly the thresholds §4.2/§7 of the design doc expect to be retuned from
+rehearsal telemetry — there's no "correct" value without a real venue.

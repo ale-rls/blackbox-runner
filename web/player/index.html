@@ -44,12 +44,18 @@
     .result { font-size: 1.3rem; font-weight: 700; margin-top: 1rem; }
     .result.win { color: #4ade80; }
     .result.lose { color: #f87171; }
+    .ritual-banner {
+      font-size: 1.4rem; font-weight: 700; color: #fbbf24;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
   </style>
 </head>
 <body>
   <div class="score-badge" id="score-badge">0 pts</div>
   <h1>Enter the number on your dot</h1>
   <div class="player-id" id="player-id"></div>
+  <div class="ritual-banner" id="ritual-banner" style="display:none">Walk to the glowing corner ✦</div>
   <div class="state lost" id="lost-banner" style="display:none">Lost — type your new number, or wait for an usher</div>
   <div id="claim-form">
     <input id="gid" inputmode="numeric" pattern="[0-9]*" maxlength="5" autofocus />
@@ -102,9 +108,11 @@
 
     function render(player) {
       const lostBanner = document.getElementById("lost-banner");
+      const ritualBanner = document.getElementById("ritual-banner");
       if (player.state === "bound") {
         form.style.display = "none";
         lostBanner.style.display = "none";
+        ritualBanner.style.display = "none"; // rebound, ritual (if any) is resolved
         statusEl.style.display = "block";
         document.getElementById("gid-display").textContent = `#${player.gid}`;
         const stateEl = document.getElementById("state-display");
@@ -112,15 +120,17 @@
         stateEl.className = "state bound";
         if (!wasBound) connectGameWs();
         wasBound = true;
-      } else if (player.state === "lost") {
-        // Backend allows self-service re-claim from "lost", so keep the
-        // form visible — most players just need to retype their new number.
+      } else if (player.state === "lost" || player.state === "orphaned") {
+        // Backend allows self-service re-claim from "lost"/"orphaned", so
+        // keep the form visible — most players just need to retype their
+        // new number, or follow the ritual banner below if one is showing.
         form.style.display = "block";
         lostBanner.style.display = "block";
         statusEl.style.display = "none";
       } else {
         form.style.display = "block";
         lostBanner.style.display = "none";
+        ritualBanner.style.display = "none";
         statusEl.style.display = "none";
       }
     }
@@ -209,6 +219,8 @@
           renderReveal(msg, msg.your_answer);
         } else if (msg.type === "scores_updated") {
           setScore(msg.your_score || 0);
+        } else if (msg.type === "ritual_prompt" && msg.player_id === playerId) {
+          document.getElementById("ritual-banner").style.display = "block";
         }
       };
       ws.onclose = () => setTimeout(() => { if (wasBound) connectGameWs(); }, 1500);

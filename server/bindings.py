@@ -1,12 +1,21 @@
 """Player <-> GID binding state machine (docs/architecture.md §4.2).
 
-Phase 1 scope: claim, automatic loss detection (a bound GID disappearing
-from TrackingBox, including a full TrackingBox restart), and operator
-(manual) rebind. Auto-rebind scoring and the ritual rebind flow for
-ambiguous cases are Phase 4.
+State machine: unclaimed -> bound -> lost -> (bound | orphaned) -> bound.
 
-State machine: unclaimed -> bound -> lost -> bound (via claim or operator
-rebind). ``orphaned``/``left`` are reserved for Phase 4/5 flows.
+* **Lost**: a bound GID disappears (individually, or via a TrackingBox
+  restart's full resync). A per-player timer starts.
+* **Auto-rebind**: whenever an unbound GID appears, it's matched against
+  every lost/orphaned player by floor-position proximity and recency. If
+  exactly one player is a plausible match, the rebind is silent. If more
+  than one is plausible, we refuse to guess — see §4.2's "never guess
+  between two candidates" — and leave everyone as they are.
+  ``_plausible_rebind_candidates`` deliberately uses hard thresholds
+  (distance + time-gap cutoffs) rather than a fully general weighted score
+  matcher; retuning those thresholds from rehearsal telemetry is exactly
+  the feedback loop the design doc describes for this section.
+* **Orphaned**: a lost player who hasn't auto-rebound within
+  ``orphan_after_s`` needs a ritual or operator rebind. Every unbound GID
+  that steps into ``ritual_zone_id`` resolves the longest-waiting orphan.
 """
 
 from __future__ import annotations
@@ -102,17 +111,38 @@ class BindingManager:
     GID disappears.
     """
 
-    def __init__(self, db: Database, session_id: int, tracking: TrackingClient) -> None:
+    def __init__(
+        self,
+        db: Database,
+        session_id: int,
+        tracking: TrackingClient,
+        *,
+        rebind_max_distance: float = 0.15,
+        rebind_max_gap_s: float = 8.0,
+        orphan_after_s: float = 3.0,
+        ritual_zone_id: Optional[str] = None,
+    ) -> None:
         self._db = db
         self.session_id = session_id
         self._tracking = tracking
+        self._rebind_max_distance = rebind_max_distance
+        self._rebind_max_gap_s = rebind_max_gap_s
+        self._orphan_after_s = orphan_after_s
+        self._ritual_zone_id = ritual_zone_id
         self._players: dict[str, Player] = {}
         self._by_gid: dict[int, str] = {}  # gid -> player_id, bound players only
+        self._orphan_tasks: dict[str, asyncio.Task] = {}
         self._listeners: list[asyncio.Queue] = []
 
     @classmethod
-    async def load(cls, db: Database, session_id: int, tracking: TrackingClient) -> "BindingManager":
-        mgr = cls(db, session_id, tracking)
+    async def load(
+        cls,
+        db: Database,
+        session_id: int,
+        tracking: TrackingClient,
+        **kwargs,
+    ) -> "BindingManager":
+        mgr = cls(db, session_id, tracking, **kwargs)
         rows = await asyncio.to_thread(db.load_players, session_id)
         for row in rows:
             player = Player.from_row(row)
@@ -216,6 +246,7 @@ class BindingManager:
         reason: BindingReason,
         actor: Optional[str] = None,
     ) -> None:
+        self._cancel_orphan_task(player.id)
         current = self._tracking.get(gid)
         player.gid = gid
         player.state = PlayerState.BOUND
@@ -230,6 +261,88 @@ class BindingManager:
         player.gid = None
         player.state = PlayerState.LOST
         await self._save(player, old_gid=old_gid, new_gid=None, reason=BindingReason.LOST)
+        self._cancel_orphan_task(player.id)
+        self._orphan_tasks[player.id] = asyncio.create_task(self._orphan_after_delay(player.id))
+
+    def _cancel_orphan_task(self, player_id: str) -> None:
+        task = self._orphan_tasks.pop(player_id, None)
+        if task is not None and not task.done():
+            task.cancel()
+
+    async def _orphan_after_delay(self, player_id: str) -> None:
+        try:
+            await asyncio.sleep(self._orphan_after_s)
+        except asyncio.CancelledError:
+            return
+        player = self._players.get(player_id)
+        if player is None or player.state != PlayerState.LOST:
+            return
+        player.state = PlayerState.ORPHANED
+        self._players[player.id] = player
+        await asyncio.to_thread(self._db.upsert_player, player.to_row())
+        self._publish(player)
+        log.info(
+            "Player %s orphaned after %.1fs with no confident auto-rebind",
+            player_id,
+            self._orphan_after_s,
+        )
+
+    # ------------------------------------------------------------------ #
+    # Auto-rebind: a fresh GID appears near where someone was lost
+    # ------------------------------------------------------------------ #
+    def _plausible_rebind_candidates(self, gid: int) -> list[Player]:
+        state = self._tracking.get(gid)
+        if state is None or not state.floor_valid or state.floor is None:
+            return []
+        now = time.time()
+        candidates = []
+        for player in self._players.values():
+            if player.state not in (PlayerState.LOST, PlayerState.ORPHANED):
+                continue
+            if player.last_seen_x is None or player.last_seen_y is None or player.last_seen_at is None:
+                continue
+            if now - player.last_seen_at > self._rebind_max_gap_s:
+                continue
+            dx = player.last_seen_x - state.floor[0]
+            dy = player.last_seen_y - state.floor[1]
+            if (dx * dx + dy * dy) ** 0.5 > self._rebind_max_distance:
+                continue
+            candidates.append(player)
+        return candidates
+
+    async def _on_gid_appeared(self, gid: int) -> None:
+        if gid in self._by_gid:
+            # Already bound — e.g. a heartbeat resync resent every visible
+            # gid, not just genuinely new ones. Never treat an owned gid as
+            # a rebind candidate.
+            return
+        candidates = self._plausible_rebind_candidates(gid)
+        if len(candidates) == 1:
+            player = candidates[0]
+            await self._bind(player, gid, old_gid=None, reason=BindingReason.AUTO_REBIND)
+            log.info("Auto-rebound player %s to gid %d", player.id, gid)
+        elif len(candidates) > 1:
+            log.info(
+                "gid %d is ambiguous between %d lost/orphaned players; not guessing",
+                gid,
+                len(candidates),
+            )
+
+    async def _maybe_resolve_ritual(self, gid: int) -> None:
+        if self._ritual_zone_id is None or gid in self._by_gid:
+            return
+        state = self._tracking.get(gid)
+        if state is None or state.zone != self._ritual_zone_id:
+            return
+        orphaned = sorted(
+            (p for p in self._players.values() if p.state == PlayerState.ORPHANED),
+            key=lambda p: p.last_seen_at or 0.0,
+        )
+        if not orphaned:
+            return
+        player = orphaned[0]
+        await self._bind(player, gid, old_gid=None, reason=BindingReason.RITUAL)
+        log.info("Ritual-rebound player %s to gid %d", player.id, gid)
 
     async def _save(
         self,
@@ -258,7 +371,7 @@ class BindingManager:
         self._publish(player)
 
     # ------------------------------------------------------------------ #
-    # Tracking event handling — automatic loss detection
+    # Tracking event handling — loss detection, auto-rebind, ritual
     # ------------------------------------------------------------------ #
     async def handle_tracking_event(self, event: TrackingEvent) -> None:
         if isinstance(event, ResyncEvent):
@@ -268,20 +381,36 @@ class BindingManager:
             for player in list(self._players.values()):
                 if player.state == PlayerState.BOUND and player.gid not in event.gids:
                     await self._mark_lost(player)
+            for gid in event.gids:
+                if gid not in self._by_gid:
+                    await self._on_gid_appeared(gid)
+                    await self._maybe_resolve_ritual(gid)
             return
 
         if isinstance(event, ChangeEvent):
-            player = self.player_for_gid(event.gid)
-            if player is None:
-                return
             if event.state is None:
-                await self._mark_lost(player)
-            else:
+                player = self.player_for_gid(event.gid)
+                if player is not None:
+                    await self._mark_lost(player)
+                return
+
+            player = self.player_for_gid(event.gid)
+            if player is not None:
                 if event.state.floor is not None:
                     player.last_seen_x, player.last_seen_y = event.state.floor
                 player.last_seen_at = time.time()
                 self._players[player.id] = player
                 await asyncio.to_thread(self._db.upsert_player, player.to_row())
+                return
+
+            # An unbound GID: try auto-rebind (and the ritual zone) on every
+            # sighting, not just the first. TrackingBox reuses GID numbers
+            # when ReID recovers someone after a brief occlusion — the same
+            # gid can go visible -> invisible -> visible again, and that
+            # *return* is exactly the case auto-rebind exists for, so it
+            # can't be gated on "have we ever seen this gid before."
+            await self._on_gid_appeared(event.gid)
+            await self._maybe_resolve_ritual(event.gid)
 
     async def run(self) -> None:
         """Long-running task: consume tracking events and update bindings."""
@@ -290,3 +419,9 @@ class BindingManager:
                 await self.handle_tracking_event(event)
             except Exception:
                 log.exception("Error handling tracking event in BindingManager")
+
+    def shutdown(self) -> None:
+        for task in self._orphan_tasks.values():
+            if not task.done():
+                task.cancel()
+        self._orphan_tasks.clear()
