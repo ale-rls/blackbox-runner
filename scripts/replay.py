@@ -2,10 +2,10 @@
 """CLI for server/replay.py — post-show timeline and state reconstruction.
 
 Usage:
-    python scripts/replay.py --db data/theater-game.db --list-sessions
-    python scripts/replay.py --db data/theater-game.db --timeline
-    python scripts/replay.py --db data/theater-game.db --player seat-14
-    python scripts/replay.py --db data/theater-game.db --at 1730000000
+    python scripts/replay.py --db data/blackbox-runner.db --list-sessions
+    python scripts/replay.py --db data/blackbox-runner.db --timeline
+    python scripts/replay.py --db data/blackbox-runner.db --player seat-14
+    python scripts/replay.py --db data/blackbox-runner.db --at 1730000000
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ def _fmt_time(at: float) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument("--db", default="data/theater-game.db", help="path to the SQLite DB file")
+    parser.add_argument("--db", default="data/blackbox-runner.db", help="path to the SQLite DB file")
     parser.add_argument("--session", type=int, help="session id (default: the most recent one)")
     parser.add_argument("--list-sessions", action="store_true", help="list sessions and exit")
     parser.add_argument("--timeline", action="store_true", help="print the full chronological event log")

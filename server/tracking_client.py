@@ -24,7 +24,7 @@ import websockets
 
 from .models import AudienceSummary, ZoneMap
 
-log = logging.getLogger("theater_game.tracking_client")
+log = logging.getLogger("blackbox_runner.tracking_client")
 
 
 @dataclass(slots=True)

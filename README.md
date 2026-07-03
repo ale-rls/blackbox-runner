@@ -1,4 +1,4 @@
-# theater-game
+# blackbox-runner
 
 Interactive theater game server for 40+ simultaneous players. Positions come
 from [TrackingBox](https://github.com/ale-rls/TrackingBox) (anonymous GIDs

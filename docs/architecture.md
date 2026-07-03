@@ -1,4 +1,4 @@
-# Theater Game Server — Design Plan
+# Blackbox Runner — Design Plan
 
 Interactive theater piece for 40+ simultaneous players. Positions come from
 the existing TrackingBox server (anonymous GIDs over REST + WebSocket).

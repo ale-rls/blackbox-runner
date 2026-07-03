@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "theater-game",
+      "name": "blackbox-runner",
       "runtimeExecutable": ".venv/bin/uvicorn",
       "runtimeArgs": ["server.app:app", "--host", "0.0.0.0", "--port", "8100"],
       "port": 8100

@@ -31,7 +31,7 @@ from .tracking_client import TrackingClient, fetch_zones
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-log = logging.getLogger("theater_game.app")
+log = logging.getLogger("blackbox_runner.app")
 
 _POSITION_LOG_INTERVAL_S = 5.0
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -161,7 +161,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     await task
             await asyncio.to_thread(db.close)
 
-    app = FastAPI(title="Theater Game Server", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Blackbox Runner", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.tracking = tracking
     app.state.db = db

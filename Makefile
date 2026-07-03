@@ -19,7 +19,7 @@ validate-content: venv
 	$(PY) scripts/validate_content.py
 
 replay: venv
-	$(PY) scripts/replay.py --db $${GAME_DB_PATH:-data/theater-game.db} $(ARGS)
+	$(PY) scripts/replay.py --db $${GAME_DB_PATH:-data/blackbox-runner.db} $(ARGS)
 
 clean:
 	rm -rf $(VENV) .pytest_cache

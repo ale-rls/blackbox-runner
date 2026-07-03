@@ -30,7 +30,7 @@ from typing import Optional
 from .persistence import Database, PlayerRow
 from .tracking_client import ChangeEvent, ResyncEvent, TrackingClient, TrackingEvent
 
-log = logging.getLogger("theater_game.bindings")
+log = logging.getLogger("blackbox_runner.bindings")
 
 
 class PlayerState(str, enum.Enum):

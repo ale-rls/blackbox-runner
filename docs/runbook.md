@@ -174,10 +174,10 @@ timestamp and a reason — this is the "why did seat-14 lose points in round
 3" answer machine.
 
 ```bash
-python scripts/replay.py --db data/theater-game.db --list-sessions
-python scripts/replay.py --db data/theater-game.db --timeline
-python scripts/replay.py --db data/theater-game.db --player seat-14
-python scripts/replay.py --db data/theater-game.db --at 1730000000   # state as of a unix timestamp
+python scripts/replay.py --db data/blackbox-runner.db --list-sessions
+python scripts/replay.py --db data/blackbox-runner.db --timeline
+python scripts/replay.py --db data/blackbox-runner.db --player seat-14
+python scripts/replay.py --db data/blackbox-runner.db --at 1730000000   # state as of a unix timestamp
 ```
 
 This is safe to run while the show is still live (SQLite WAL mode allows
