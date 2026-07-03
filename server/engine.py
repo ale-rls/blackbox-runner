@@ -28,7 +28,7 @@ from .content import RoundContent, ShowContent
 from .persistence import AnswerRow, Database
 from .tracking_client import TrackingClient
 
-log = logging.getLogger("theater_game.engine")
+log = logging.getLogger("blackbox_runner.engine")
 
 
 class RoundState(str, enum.Enum):

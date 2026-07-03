@@ -20,7 +20,7 @@ class Settings:
     reconnect_initial_s: float = 0.5
     reconnect_max_s: float = 30.0
     position_history_seconds: float = 5.0
-    db_path: str = "data/theater-game.db"
+    db_path: str = "data/blackbox-runner.db"
     content_path: str = "content/show.yaml"
     rebind_max_distance: float = 0.15
     rebind_max_gap_s: float = 8.0

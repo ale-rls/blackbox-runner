@@ -1,5 +1,5 @@
 [project]
-name = "theater-game"
+name = "blackbox-runner"
 version = "0.1.0"
 description = "Theater game server consuming TrackingBox over WebSocket"
 requires-python = ">=3.11"
