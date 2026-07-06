@@ -21,10 +21,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import show_store, tts
+from . import content_db, show_store, tts
 from .bindings import BindingError, BindingManager, PlayerState
 from .config import Settings
-from .content import ContentError, ShowContent, load_show
+from .content import ContentError, ShowContent
 from .engine import EngineError, GameEngine
 from .models import ZoneMap
 from .persistence import Database
@@ -140,10 +140,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         try:
             show = await asyncio.to_thread(
-                load_show, settings.content_path, valid_zone_ids=app.state.zones.zone_ids()
+                content_db.load_show_db, db, valid_zone_ids=app.state.zones.zone_ids()
             )
-            log.info("Loaded show content: %d round(s) from %s", len(show.rounds), settings.content_path)
-        except (ContentError, FileNotFoundError) as exc:
+            log.info("Loaded show content: %d round(s) from database", len(show.rounds))
+        except ContentError as exc:
             log.warning("Could not load show content (%s); round control disabled", exc)
             show = _EMPTY_SHOW
         app.state.show = show
@@ -259,12 +259,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/admin/content/reload")
     async def reload_content() -> dict:
-        """Hot-reload content/show.yaml between rounds (docs/runbook.md's
-        content freeze process covers when this is and isn't safe to use).
+        """Hot-reload the DB-stored show between rounds — e.g. after an
+        operator ran scripts/import_content.py against a live server
+        (docs/runbook.md's content freeze process covers when this is and
+        isn't safe to use).
         """
         try:
             show = await asyncio.to_thread(
-                load_show, settings.content_path, valid_zone_ids=app.state.zones.zone_ids()
+                content_db.load_show_db, db, valid_zone_ids=app.state.zones.zone_ids()
             )
         except ContentError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -276,8 +278,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"ok": True, "rounds": len(show.rounds)}
 
     # -------------------------------------------------------------- #
-    # Admin — show editor (content/show.yaml is the source of truth;
-    # edits are written back there, not into the running engine)
+    # Admin — show editor (the DB's content_rounds table is the source
+    # of truth; edits are written back there, not into the running
+    # engine. show.yaml is only the authoring copy, applied via
+    # scripts/import_content.py.)
     # -------------------------------------------------------------- #
     def _edit_zone_ids() -> Optional[set[str]]:
         # Mirror startup validation when TrackingBox's zones are known, but
@@ -288,7 +292,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def _reload_engine(show: ShowContent) -> tuple[bool, Optional[str]]:
         """Apply a freshly saved show to the engine if between rounds. The
-        file write already happened either way — an edit made mid-round is
+        DB write already happened either way — an edit made mid-round is
         kept, it just applies on the next reload."""
         try:
             app.state.engine.reload_show(show)
@@ -300,8 +304,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/admin/content")
     async def get_content() -> dict:
         try:
-            show = await asyncio.to_thread(load_show, settings.content_path)
-        except (ContentError, FileNotFoundError) as exc:
+            show = await asyncio.to_thread(content_db.load_show_db, db)
+        except ContentError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         audio_dir = Path(settings.audio_dir)
         rounds = []
@@ -312,7 +316,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             rounds.append(dump)
         return {
             "version": show.version,
-            "path": settings.content_path,
             "rounds": rounds,
             "tts": {
                 "configured": bool(settings.elevenlabs_api_key),
@@ -326,7 +329,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             show = await asyncio.to_thread(
                 show_store.update_round,
-                settings.content_path,
+                db,
                 round_id,
                 fields,
                 valid_zone_ids=_edit_zone_ids(),
@@ -344,11 +347,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=503,
                 detail="ElevenLabs is not configured — set ELEVENLABS_API_KEY",
             )
-        # Read from the file, not the running engine: an edit saved mid-round
-        # (reloaded: false) must still be what gets narrated.
+        # Read fresh from the DB, not the running engine: an edit saved
+        # mid-round (reloaded: false) must still be what gets narrated.
         try:
-            show = await asyncio.to_thread(load_show, settings.content_path)
-        except (ContentError, FileNotFoundError) as exc:
+            show = await asyncio.to_thread(content_db.load_show_db, db)
+        except ContentError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         round_ = next((r for r in show.rounds if r.id == round_id), None)
         if round_ is None:
@@ -377,7 +380,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await asyncio.to_thread((Path(settings.audio_dir) / filename).write_bytes, audio_bytes)
         show = await asyncio.to_thread(
             show_store.update_round,
-            settings.content_path,
+            db,
             round_id,
             {"audio": filename},
             valid_zone_ids=_edit_zone_ids(),
@@ -490,7 +493,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if (_WEB_DIR / "admin").is_dir():
         app.mount("/admin", StaticFiles(directory=_WEB_DIR / "admin", html=True), name="admin")
 
-    # Narration mp3s referenced by content/show.yaml's ``audio:`` field.
+    # Narration mp3s referenced by the show rounds' ``audio`` field.
     audio_dir = Path(settings.audio_dir)
     audio_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/audio", StaticFiles(directory=audio_dir), name="audio")

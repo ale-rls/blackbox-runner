@@ -9,6 +9,7 @@ TrackingBox's own thread-safety pattern for its in-memory store.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
@@ -82,6 +83,28 @@ CREATE TABLE IF NOT EXISTS score_events (
     at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_score_events_session ON score_events(session_id);
+
+CREATE TABLE IF NOT EXISTS content_meta (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    version TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS content_rounds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    round_id TEXT NOT NULL UNIQUE,
+    ord INTEGER NOT NULL UNIQUE,
+    question TEXT NOT NULL DEFAULT '',
+    type TEXT NOT NULL DEFAULT 'majority',
+    duration_s REAL NOT NULL DEFAULT 20.0,
+    grace_s REAL NOT NULL DEFAULT 5.0,
+    points INTEGER NOT NULL DEFAULT 10,
+    text TEXT,
+    audio TEXT,
+    form TEXT NOT NULL DEFAULT 'choice',
+    zone_layout TEXT,
+    form_labels TEXT NOT NULL DEFAULT '{}',
+    options TEXT NOT NULL DEFAULT '[]'
+);
 """
 
 
@@ -130,6 +153,29 @@ class AnswerRow:
     position_x: Optional[float]
     position_y: Optional[float]
     at: float
+
+
+@dataclass(slots=True)
+class ContentRoundRow:
+    """One show round as stored in content_rounds. ``form_labels`` and
+    ``options`` are held parsed (dict / list of dicts); the JSON
+    (de)serialization happens inside the Database methods. ``zone_layout``
+    stays None unless the author set it explicitly, so a form change keeps
+    re-deriving the layout (content.py's FORM_LAYOUTS)."""
+
+    round_id: str
+    ord: int
+    question: str
+    type: str
+    duration_s: float
+    grace_s: float
+    points: int
+    text: Optional[str]
+    audio: Optional[str]
+    form: str
+    zone_layout: Optional[str]
+    form_labels: dict
+    options: list
 
 
 @dataclass(slots=True)
@@ -338,6 +384,69 @@ class Database:
                 (session_id,),
             ).fetchall()
             return [ScoreEventRow(**dict(row)) for row in rows]
+
+    # ------------------------------------------------------------------ #
+    # Show content (imported from the authoring YAML; the DB is the
+    # runtime source of truth)
+    # ------------------------------------------------------------------ #
+    def load_content(self) -> tuple[str, list[ContentRoundRow]]:
+        """Returns (version, rounds ordered by ord). An empty table is a
+        valid "no show imported yet" state: ("", [])."""
+        with self._lock:
+            meta = self._conn.execute("SELECT version FROM content_meta WHERE id = 1").fetchone()
+            rows = self._conn.execute(
+                "SELECT round_id, ord, question, type, duration_s, grace_s, points, "
+                "text, audio, form, zone_layout, form_labels, options "
+                "FROM content_rounds ORDER BY ord"
+            ).fetchall()
+        out = []
+        for row in rows:
+            data = dict(row)
+            data["form_labels"] = json.loads(data["form_labels"])
+            data["options"] = json.loads(data["options"])
+            out.append(ContentRoundRow(**data))
+        return (meta["version"] if meta else "", out)
+
+    def save_content(self, version: str, rows: list[ContentRoundRow]) -> None:
+        """Wipe-and-replace the whole show in one transaction — both the
+        import script and single-round admin edits go through here, so a
+        failure never leaves a half-written show."""
+        with self._lock:
+            try:
+                self._conn.execute("DELETE FROM content_rounds")
+                self._conn.executemany(
+                    "INSERT INTO content_rounds "
+                    "(round_id, ord, question, type, duration_s, grace_s, points, "
+                    " text, audio, form, zone_layout, form_labels, options) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            r.round_id,
+                            r.ord,
+                            r.question,
+                            r.type,
+                            r.duration_s,
+                            r.grace_s,
+                            r.points,
+                            r.text,
+                            r.audio,
+                            r.form,
+                            r.zone_layout,
+                            json.dumps(r.form_labels, ensure_ascii=False),
+                            json.dumps(r.options, ensure_ascii=False),
+                        )
+                        for r in rows
+                    ],
+                )
+                self._conn.execute(
+                    "INSERT INTO content_meta (id, version) VALUES (1, ?) "
+                    "ON CONFLICT(id) DO UPDATE SET version=excluded.version",
+                    (version,),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     # ------------------------------------------------------------------ #
     # Sessions (listing, for replay/reporting tools)

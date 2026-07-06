@@ -69,7 +69,7 @@ people to physically be standing.
 
 From the admin dashboard's **Round control** section:
 
-- **Start next round** — opens the next question in `content/show.yaml`.
+- **Start next round** — opens the next question of the imported show.
   Timing is automatic from there (`duration_s`, then `grace_s`), but you
   can also:
 - **Close** — lock in answers early (e.g. everyone's clearly settled and
@@ -86,16 +86,16 @@ which dot is them.
 
 ### Narration steps and audio
 
-Steps with `type: narration` in `content/show.yaml` (the Modell-Intro,
+Steps with `type: narration` (the Modell-Intro,
 epoch intros/outros) have no answers and no timer when `duration_s: 0`:
 **Start next round** opens them, the players read the `text` and hear the
 mp3, and you press **Reveal** to finish the step and move on.
 
 Voice-over mp3s live in `content/audio/` (override with `GAME_AUDIO_DIR`)
 and are served at `/audio/<name>.mp3`. To wire one up: drop the file in
-that folder, set `audio: <name>.mp3` on the step in `show.yaml` (or via the
-**Show editor**, below), then **Reload content** from the admin dashboard
-(only works between rounds).
+that folder, set the step's audio file via the **Show editor** (or set
+`audio: <name>.mp3` in `show.yaml` and re-import), then **Reload content**
+from the admin dashboard (only works between rounds).
 Players unlock audio with their first tap (the claim button); anyone who
 reconnects without tapping gets a "Tippen, um den Ton zu starten" overlay
 the next time a step tries to speak.
@@ -103,13 +103,16 @@ the next time a step tries to speak.
 ### Show editor and ElevenLabs voice generation
 
 The **Show editor** card at the bottom of the admin dashboard lists every
-step in `content/show.yaml`. **Edit** changes a step's question/title,
-narration text, audio file, timing, and labels; **Save to show.yaml**
-writes straight back to the YAML file (comments and formatting are
-preserved) and hot-reloads it if no round is in flight. If a round *is* in
-flight the edit is still saved and takes effect on the next
-**Reload content**. Structural changes — adding/removing steps, changing
-zones or form types — are still done by hand in the YAML file.
+step of the imported show. **Edit** changes a step's question/title,
+narration text, audio file, timing, and labels; **Save changes** writes
+straight to the server's database and hot-reloads it if no round is in
+flight. If a round *is* in flight the edit is still saved and takes effect
+on the next **Reload content**. Structural changes — adding/removing
+steps, changing zones or form types — are done in the authoring copy
+`content/show.yaml`, then applied with `scripts/import_content.py` (see
+[Content freeze process](#content-freeze-process)). Note that admin-console
+edits live only in the DB: re-importing show.yaml overwrites them, so port
+edits you want to keep back into the YAML.
 
 To generate voice-overs with ElevenLabs, start the server with an API key
 (and usually a default voice):
@@ -230,26 +233,17 @@ for `REBIND_MAX_DISTANCE` / `REBIND_MAX_GAP_S` / `ORPHAN_AFTER_S`.
 
 ## Content freeze process
 
-`content/show.yaml` can be edited and reloaded without restarting the
-server:
-
-```bash
-curl -X POST http://localhost:8100/api/admin/content/reload
-```
-
-This re-validates the file (every answer option must reference a real
-TrackingBox zone — a typo is rejected, not silently accepted) and swaps it
-in. It's refused with a 409 if a round is currently in progress — reload
-between rounds only.
-
-**Freeze content before doors open.** Live-reloading is for rehearsal
-iteration, not for changing the show while it's running:
+The server plays the show from its database; `content/show.yaml` is the
+git-tracked authoring copy. Content changes flow show.yaml → validate →
+import → reload:
 
 1. Whoever owns the questions edits `content/show.yaml` — directly (plain
    YAML, no code required; see the existing rounds for the format:
    `type: majority | minority | correct_zone | narration`, `options` each
-   with a `zone` that must match a real TrackingBox zone id), or through
-   the admin dashboard's **Show editor** for text/label/timing changes.
+   with a `zone` that must match a real TrackingBox zone id). Simple
+   text/label/timing changes can instead be made live in the admin
+   dashboard's **Show editor** (they skip the import, but also aren't in
+   git — port keepers back into the YAML).
 2. Validate it against the venue's actual zone map before the show
    (requires TrackingBox already running with the venue's zone config):
    ```bash
@@ -258,7 +252,23 @@ iteration, not for changing the show while it's running:
    #     [majority     ] r1: 'Coffee or tea?' -> answer_a (Coffee), answer_b (Tea)
    #     ...
    ```
-3. Once the show starts, don't edit content further unless you have a
-   specific, tested reason and you do it between rounds — reordering or
-   removing rounds mid-show can shift what "round 3" means for anyone
-   relying on the recovered index after a restart.
+3. Import it into the game database (validates again; writes nothing if
+   invalid — add `--dry-run` to only check):
+   ```bash
+   python scripts/import_content.py   # defaults: content/show.yaml -> data/blackbox-runner.db
+   ```
+4. If the server is already running, apply it without a restart:
+   ```bash
+   curl -X POST http://localhost:8100/api/admin/content/reload
+   ```
+   This re-validates the imported rounds (every "choice" answer option must
+   reference a real TrackingBox zone — a typo is rejected, not silently
+   accepted) and swaps them in. It's refused with a 409 if a round is
+   currently in progress — reload between rounds only.
+
+**Freeze content before doors open.** Import/reload is for rehearsal
+iteration, not for changing the show while it's running. Once the show
+starts, don't touch content unless you have a specific, tested reason and
+you do it between rounds — reordering or removing rounds mid-show can
+shift what "round 3" means for anyone relying on the recovered index
+after a restart.
