@@ -1,3 +1,7 @@
+# AUTHORING COPY — the server plays the show from its database, not from
+# this file. After editing, apply with:  make import-content
+# (validates first, writes nothing if invalid), then "Reload content" in
+# the admin console if the server is already running.
 version: "2"
 rounds:
   # ---------------------------------------------------------------- #

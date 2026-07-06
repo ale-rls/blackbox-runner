@@ -310,7 +310,7 @@
 
     <section class="card" id="card-editor">
       <div class="card-head">
-        <h2>Show editor <small style="color:var(--muted); text-transform:none; letter-spacing:0" id="editor-path"></small></h2>
+        <h2>Show editor</h2>
         <div class="aux">
           <span class="tts-note" id="tts-note"></span>
           <input id="tts-voice" placeholder="voice id override" title="ElevenLabs voice id — leave empty for the configured ELEVENLABS_VOICE_ID" />
@@ -752,7 +752,7 @@
     });
 
     // ---------------------------------------------------------------- //
-    // Show editor — edits go to content/show.yaml via the admin API and
+    // Show editor — edits go to the server's content database via the admin API and
     // hot-reload into the engine when no round is in flight. The table is
     // only rebuilt on explicit loads (never on a timer), so an open editor
     // form is never wiped mid-typing.
@@ -784,7 +784,6 @@
 
     function renderEditor() {
       openEditorId = null;
-      $("editor-path").textContent = `— ${showContent.path}`;
       const note = $("tts-note");
       if (ttsReady()) {
         note.className = "tts-note";
@@ -936,14 +935,14 @@
           row.append(zone, input);
           list.appendChild(row);
         }
-        root.appendChild(field("Answer options (zones are hand-edited in show.yaml)", list));
+        root.appendChild(field("Answer options (zones are set via scripts/import_content.py)", list));
       }
 
       const actionsEl = document.createElement("div");
       actionsEl.className = "editor-actions";
       const save = document.createElement("button");
       save.className = "primary";
-      save.textContent = "Save to show.yaml";
+      save.textContent = "Save changes";
       const cancel = document.createElement("button");
       cancel.className = "ghost";
       cancel.textContent = "Cancel";

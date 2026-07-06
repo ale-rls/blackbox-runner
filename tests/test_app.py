@@ -4,10 +4,13 @@ import asyncio
 
 import httpx
 import pytest
+import yaml
 from asgi_lifespan import LifespanManager
 
+from server import content_db
 from server.app import create_app
 from server.config import Settings
+from server.persistence import Database
 
 
 # A minimal scoreable show against conftest's answer_a/answer_b zones, so app
@@ -24,14 +27,23 @@ _TEST_SHOW = (
 )
 
 
+def _import_show(db_path: str, yaml_text: str) -> None:
+    """Push a YAML show into the game DB, as scripts/import_content.py does."""
+    raw = yaml.safe_load(yaml_text)
+    db = Database(db_path)
+    try:
+        db.save_content(str(raw.get("version", "1")), content_db.rows_from_raw(raw["rounds"]))
+    finally:
+        db.close()
+
+
 def _settings(fake_backend, fake_zones_http, tmp_path) -> Settings:
-    content_path = tmp_path / "show.yaml"
-    content_path.write_text(_TEST_SHOW)
+    db_path = str(tmp_path / "game.db")
+    _import_show(db_path, _TEST_SHOW)
     return Settings(
         tracking_ws_url=fake_backend.ws_url,
         tracking_http_url=fake_zones_http,
-        db_path=str(tmp_path / "game.db"),
-        content_path=str(content_path),
+        db_path=db_path,
         audio_dir=str(tmp_path / "audio"),
     )
 
@@ -176,21 +188,21 @@ async def test_admin_fire_cue_reaches_td_subscribers(fake_backend, fake_zones_ht
 
 @pytest.mark.asyncio
 async def test_content_reload_endpoint(fake_backend, fake_zones_http, tmp_path):
-    content_path = tmp_path / "show.yaml"
-    content_path.write_text(
+    db_path = str(tmp_path / "game.db")
+    _import_show(
+        db_path,
         "version: '1'\n"
         "rounds:\n"
         "  - id: r1\n"
         "    question: Original\n"
         "    options:\n"
         "      - {zone: answer_a, label: A}\n"
-        "      - {zone: answer_b, label: B}\n"
+        "      - {zone: answer_b, label: B}\n",
     )
     settings = Settings(
         tracking_ws_url=fake_backend.ws_url,
         tracking_http_url=fake_zones_http,
-        db_path=str(tmp_path / "game.db"),
-        content_path=str(content_path),
+        db_path=db_path,
     )
     app = create_app(settings)
 
@@ -199,14 +211,17 @@ async def test_content_reload_endpoint(fake_backend, fake_zones_http, tmp_path):
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             assert app.state.show.rounds[0].question == "Original"
 
-            content_path.write_text(
+            # Re-import against the live server's DB (separate connection,
+            # as scripts/import_content.py would), then hot-reload.
+            _import_show(
+                db_path,
                 "version: '2'\n"
                 "rounds:\n"
                 "  - id: r1\n"
                 "    question: Updated\n"
                 "    options:\n"
                 "      - {zone: answer_a, label: A}\n"
-                "      - {zone: answer_b, label: B}\n"
+                "      - {zone: answer_b, label: B}\n",
             )
             resp = await client.post("/api/admin/content/reload")
             assert resp.status_code == 200
@@ -215,14 +230,15 @@ async def test_content_reload_endpoint(fake_backend, fake_zones_http, tmp_path):
 
             # Refused once a round is in flight.
             await client.post("/api/admin/rounds/start")
-            content_path.write_text(
+            _import_show(
+                db_path,
                 "version: '3'\n"
                 "rounds:\n"
                 "  - id: r1\n"
                 "    question: Should not apply\n"
                 "    options:\n"
                 "      - {zone: answer_a, label: A}\n"
-                "      - {zone: answer_b, label: B}\n"
+                "      - {zone: answer_b, label: B}\n",
             )
             resp = await client.post("/api/admin/content/reload")
             assert resp.status_code == 409
@@ -244,7 +260,7 @@ async def test_show_editor_endpoints(fake_backend, fake_zones_http, tmp_path):
             assert [r["id"] for r in content["rounds"]] == ["r1"]
             assert content["rounds"][0]["audio_exists"] is False
 
-            # Edit between rounds: file + running engine both update.
+            # Edit between rounds: stored rows + running engine both update.
             resp = await client.put(
                 "/api/admin/content/rounds/r1", json={"question": "Beer or wine?"}
             )
@@ -252,11 +268,12 @@ async def test_show_editor_endpoints(fake_backend, fake_zones_http, tmp_path):
             body = resp.json()
             assert body["reloaded"] is True
             assert body["round"]["question"] == "Beer or wine?"
-            assert "Beer or wine?" in (tmp_path / "show.yaml").read_text()
+            _, rows = app.state.db.load_content()
+            assert rows[0].question == "Beer or wine?"
             assert app.state.show.rounds[0].question == "Beer or wine?"
 
-            # Invalid edits are rejected and never reach the file.
-            before = (tmp_path / "show.yaml").read_text()
+            # Invalid edits are rejected and never reach the DB.
+            before = app.state.db.load_content()
             resp = await client.put("/api/admin/content/rounds/r1", json={"id": "r2"})
             assert resp.status_code == 400
             resp = await client.put(
@@ -264,19 +281,20 @@ async def test_show_editor_endpoints(fake_backend, fake_zones_http, tmp_path):
                 json={"options": [{"zone": "bogus_zone", "label": "X"}]},
             )
             assert resp.status_code == 400
-            assert (tmp_path / "show.yaml").read_text() == before
+            assert app.state.db.load_content() == before
 
             resp = await client.put("/api/admin/content/rounds/ghost", json={"question": "?"})
             assert resp.status_code == 400
 
-            # Mid-round: the edit is saved to the file but not hot-applied.
+            # Mid-round: the edit is saved to the DB but not hot-applied.
             assert (await client.post("/api/admin/rounds/start")).status_code == 200
             resp = await client.put(
                 "/api/admin/content/rounds/r1", json={"question": "Mid-round edit"}
             )
             assert resp.status_code == 200
             assert resp.json()["reloaded"] is False
-            assert "Mid-round edit" in (tmp_path / "show.yaml").read_text()
+            _, rows = app.state.db.load_content()
+            assert rows[0].question == "Mid-round edit"
             assert app.state.show.rounds[0].question == "Beer or wine?"
 
 
@@ -331,7 +349,7 @@ async def test_tts_endpoint_generates_and_wires_audio(
             assert calls["voice_id"] == "voice-9"
             assert calls["text"] == "Coffee or tea?"  # no text: falls back to question
 
-            # mp3 landed in the audio dir and is served; show.yaml points at it.
+            # mp3 landed in the audio dir and is served; the stored round points at it.
             assert (tmp_path / "audio" / "r1.mp3").read_bytes() == b"ID3fake-mp3"
             assert (await client.get("/audio/r1.mp3")).content == b"ID3fake-mp3"
             assert app.state.show.rounds[0].audio == "r1.mp3"

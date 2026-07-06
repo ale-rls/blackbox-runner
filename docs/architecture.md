@@ -82,12 +82,13 @@ server/
   engine.py            # round state machine, timers, zone evaluation, scoring
   persistence.py       # SQLite (WAL), write-through, crash recovery
   models.py            # pydantic models incl. copied TrackingBox message shapes
-  content.py           # loads/validates rounds & questions from content/
+  content.py           # validates rounds & questions (pydantic models)
+  content_db.py        # loads the show from the DB (runtime source of truth)
 web/
   player/              # phone page (one per player ID)
   admin/                # operator dashboard
 content/
-  show.yaml            # rounds, questions, zone->answer mapping, timing
+  show.yaml            # AUTHORING copy: edit here, then scripts/import_content.py
 tests/
   scenarios/           # scripted GID-churn scenarios against the mock backend
 Makefile               # `make dev` boots TrackingBox (mock) + game server + web
@@ -117,13 +118,22 @@ transition, so a crashed game server reloads mid-show exactly where it died.
 * `score_events(id, session_id, player_id, round_id, points, reason)` —
   scores are derived (SUM), never stored as a mutable counter; operator
   corrections are just more events.
+* `content_rounds(id, round_id, ord, question, type, duration_s, grace_s,
+  points, text, audio, form, zone_layout, form_labels, options)` +
+  `content_meta(version)` — the show's rounds/questions themselves.
+  `form_labels`/`options` are JSON text (always read/written whole);
+  `ord` gives the engine its stable round order. Written only whole-show
+  in one transaction (import script and admin edits alike), so storage
+  never holds a half-written show.
 
-Questions/rounds live in `content/show.yaml` (editable by non-programmers,
-hot-reloaded between rounds), validated on load: rounds with a `zone_layout`
-must have an option count their layout supports (options are ordered along
-the layout — left→right, top→bottom, tl/tr/bl/br, center→edge); "choice"
-round options must reference a zone ID that exists in TrackingBox's
-`/api/zones`.
+Questions/rounds are authored in `content/show.yaml` (editable by
+non-programmers, git-tracked for diffs) and pushed into `content_rounds`
+with `scripts/import_content.py`; the server loads only the DB, and
+hot-reloads it between rounds. Validation is the same either way: rounds
+with a `zone_layout` must have an option count their layout supports
+(options are ordered along the layout — left→right, top→bottom,
+tl/tr/bl/br, center→edge); "choice" round options must reference a zone ID
+that exists in TrackingBox's `/api/zones`.
 
 ## 4. Core components
 
@@ -163,8 +173,8 @@ Per-player state machine: `unclaimed -> bound -> lost -> (bound | orphaned) -> b
 
 ### 4.3 Game engine
 
-* Round state machine driven by `content/show.yaml` + operator commands
-  (auto-advance timers with manual override always available).
+* Round state machine driven by the DB-stored show content + operator
+  commands (auto-advance timers with manual override always available).
 * Answer evaluation: at `closing`, take one authoritative position
   snapshot; resolve each bound player's floor point through the round's
   `zone_layout` (circles / x_axis / y_axis / quadrants over the whole

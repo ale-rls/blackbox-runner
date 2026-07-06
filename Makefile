@@ -1,4 +1,4 @@
-.PHONY: venv dev test lint clean validate-content replay
+.PHONY: venv dev test lint clean validate-content import-content replay
 
 VENV := .venv
 PY := $(VENV)/bin/python
@@ -17,6 +17,9 @@ test: venv
 
 validate-content: venv
 	$(PY) scripts/validate_content.py
+
+import-content: venv
+	$(PY) scripts/import_content.py --db $${GAME_DB_PATH:-data/blackbox-runner.db} $(ARGS)
 
 replay: venv
 	$(PY) scripts/replay.py --db $${GAME_DB_PATH:-data/blackbox-runner.db} $(ARGS)
