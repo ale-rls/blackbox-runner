@@ -84,6 +84,49 @@ persistent orphan (more than a few seconds) is your cue to walk over and
 help, or use the **Rebind** button next to their row once you can see
 which dot is them.
 
+### Narration steps and audio
+
+Steps with `type: narration` in `content/show.yaml` (the Modell-Intro,
+epoch intros/outros) have no answers and no timer when `duration_s: 0`:
+**Start next round** opens them, the players read the `text` and hear the
+mp3, and you press **Reveal** to finish the step and move on.
+
+Voice-over mp3s live in `content/audio/` (override with `GAME_AUDIO_DIR`)
+and are served at `/audio/<name>.mp3`. To wire one up: drop the file in
+that folder, set `audio: <name>.mp3` on the step in `show.yaml` (or via the
+**Show editor**, below), then **Reload content** from the admin dashboard
+(only works between rounds).
+Players unlock audio with their first tap (the claim button); anyone who
+reconnects without tapping gets a "Tippen, um den Ton zu starten" overlay
+the next time a step tries to speak.
+
+### Show editor and ElevenLabs voice generation
+
+The **Show editor** card at the bottom of the admin dashboard lists every
+step in `content/show.yaml`. **Edit** changes a step's question/title,
+narration text, audio file, timing, and labels; **Save to show.yaml**
+writes straight back to the YAML file (comments and formatting are
+preserved) and hot-reloads it if no round is in flight. If a round *is* in
+flight the edit is still saved and takes effect on the next
+**Reload content**. Structural changes — adding/removing steps, changing
+zones or form types — are still done by hand in the YAML file.
+
+To generate voice-overs with ElevenLabs, start the server with an API key
+(and usually a default voice):
+
+```bash
+ELEVENLABS_API_KEY=... ELEVENLABS_VOICE_ID=... make dev
+# optional: ELEVENLABS_MODEL_ID (default eleven_multilingual_v2, good German)
+```
+
+Then use **Generate voice** on a step (renders that step's `text` to
+`content/audio/<step-id>.mp3` and points the step's `audio:` at it) or
+**Generate missing audio** to fill every step that has no mp3 on disk.
+The voice id field in the card header overrides the default voice per
+generation — handy for auditioning voices. Generation costs ElevenLabs
+credits and a long monologue takes tens of seconds; do this in prep, not
+mid-show.
+
 ## Health checks, anytime
 
 ```bash
@@ -202,10 +245,11 @@ between rounds only.
 **Freeze content before doors open.** Live-reloading is for rehearsal
 iteration, not for changing the show while it's running:
 
-1. Whoever owns the questions edits `content/show.yaml` directly — it's
-   plain YAML, no code required. See the existing rounds for the format
-   (`type: majority | minority | correct_zone`, `options` each with a
-   `zone` that must match a real TrackingBox zone id).
+1. Whoever owns the questions edits `content/show.yaml` — directly (plain
+   YAML, no code required; see the existing rounds for the format:
+   `type: majority | minority | correct_zone | narration`, `options` each
+   with a `zone` that must match a real TrackingBox zone id), or through
+   the admin dashboard's **Show editor** for text/label/timing changes.
 2. Validate it against the venue's actual zone map before the show
    (requires TrackingBox already running with the venue's zone config):
    ```bash

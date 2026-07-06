@@ -64,17 +64,19 @@
         "round round"
         "board map"
         "board scores"
-        "cues  scores";
+        "cues  scores"
+        "editor editor";
       align-items: start;
     }
     @media (max-width: 60rem) {
-      main { grid-template-columns: 1fr; grid-template-areas: "round" "map" "board" "scores" "cues"; }
+      main { grid-template-columns: 1fr; grid-template-areas: "round" "map" "board" "scores" "cues" "editor"; }
     }
     #card-round { grid-area: round; }
     #card-board { grid-area: board; }
     #card-map { grid-area: map; }
     #card-scores { grid-area: scores; }
     #card-cues { grid-area: cues; }
+    #card-editor { grid-area: editor; }
 
     .card {
       background: var(--panel); border: 1px solid var(--border);
@@ -102,11 +104,12 @@
     button.ghost { color: var(--muted); }
     button.small { font-size: 0.8rem; padding: 0.3em 0.7em; }
     button.ritual { border-color: rgba(251, 191, 36, 0.4); color: var(--amber); }
-    input[type="text"], input:not([type]) , input[type="number"] {
+    input[type="text"], input:not([type]) , input[type="number"], textarea {
       font: inherit; background: var(--panel-2); color: var(--text);
       border: 1px solid var(--border); border-radius: 0.45rem; padding: 0.4em 0.6em;
     }
-    input:focus { outline: none; border-color: var(--accent); }
+    input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+    textarea { resize: vertical; line-height: 1.5; }
     .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
     /* Round control */
@@ -189,6 +192,40 @@
     .cue-log .type { color: var(--accent); flex-shrink: 0; }
     .cue-log .body { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+    /* Show editor */
+    .tag {
+      display: inline-block; padding: 0.15em 0.6em; border-radius: 999px;
+      font-size: 0.7rem; font-weight: 600; color: var(--muted);
+      border: 1px solid var(--border); background: var(--panel-2);
+    }
+    .tag.narration { color: var(--accent); border-color: rgba(109, 116, 246, 0.4); }
+    td.editor-q { max-width: 26rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .audio-ok { color: var(--green); }
+    .audio-ok a { color: inherit; }
+    .audio-missing { color: var(--red); }
+    .audio-none { color: var(--muted); }
+    tr.editor-open td { border-bottom: none; }
+    .round-editor {
+      display: grid; gap: 0.8rem; margin: 0.2rem 0 0.8rem;
+      background: var(--panel-2); border: 1px solid var(--border-soft);
+      border-radius: 0.6rem; padding: 0.9rem 1rem;
+    }
+    .round-editor .field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .round-editor .field > span {
+      font-size: 0.68rem; font-weight: 600; letter-spacing: 0.11em;
+      text-transform: uppercase; color: var(--muted);
+    }
+    .round-editor .field-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.7rem;
+    }
+    .round-editor .option-row { display: flex; align-items: center; gap: 0.6rem; }
+    .round-editor .option-row input { flex: 1; }
+    .round-editor .zone-chip { font-family: var(--mono); font-size: 0.74rem; color: var(--muted); min-width: 7em; }
+    .round-editor .editor-actions { display: flex; gap: 0.5rem; align-items: center; }
+    .tts-note { font-size: 0.78rem; color: var(--muted); }
+    .tts-note.off { color: var(--amber); }
+    input#tts-voice { width: 15em; font-family: var(--mono); font-size: 0.8rem; }
+
     /* Toast */
     #toast {
       position: fixed; bottom: 1.2rem; left: 50%; transform: translateX(-50%) translateY(1rem);
@@ -269,6 +306,24 @@
         <button class="primary" id="btn-cue">Fire</button>
       </div>
       <div class="cue-log" id="cue-log"></div>
+    </section>
+
+    <section class="card" id="card-editor">
+      <div class="card-head">
+        <h2>Show editor <small style="color:var(--muted); text-transform:none; letter-spacing:0" id="editor-path"></small></h2>
+        <div class="aux">
+          <span class="tts-note" id="tts-note"></span>
+          <input id="tts-voice" placeholder="voice id override" title="ElevenLabs voice id — leave empty for the configured ELEVENLABS_VOICE_ID" />
+          <button class="small" id="btn-tts-missing">Generate missing audio</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>#</th><th>Step</th><th>Type</th><th>Question</th><th>Audio</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="editor-rows"></tbody>
+      </table>
+      <div class="empty" id="editor-empty" style="display:none">Show content not loaded.</div>
     </section>
   </main>
 
@@ -554,6 +609,7 @@
       } catch (err) {
         toast(err.message, true);
       }
+      loadContent();
     });
 
     async function refreshRound() {
@@ -672,6 +728,291 @@
       }
     });
 
+    // ---------------------------------------------------------------- //
+    // Show editor — edits go to content/show.yaml via the admin API and
+    // hot-reload into the engine when no round is in flight. The table is
+    // only rebuilt on explicit loads (never on a timer), so an open editor
+    // form is never wiped mid-typing.
+    // ---------------------------------------------------------------- //
+    let showContent = null; // last GET /api/admin/content payload
+    let openEditorId = null;
+
+    async function loadContent() {
+      try {
+        const resp = await fetch("/api/admin/content");
+        if (!resp.ok) {
+          const detail = (await resp.json().catch(() => ({}))).detail;
+          throw new Error(detail || `content load failed (${resp.status})`);
+        }
+        showContent = await resp.json();
+        renderEditor();
+      } catch (err) {
+        showContent = null;
+        $("editor-rows").innerHTML = "";
+        const empty = $("editor-empty");
+        empty.style.display = "block";
+        empty.textContent = err.message;
+      }
+    }
+
+    function ttsReady() {
+      return !!(showContent && showContent.tts && showContent.tts.configured);
+    }
+
+    function renderEditor() {
+      openEditorId = null;
+      $("editor-path").textContent = `— ${showContent.path}`;
+      const note = $("tts-note");
+      if (ttsReady()) {
+        note.className = "tts-note";
+        note.textContent = `ElevenLabs ready (${showContent.tts.model_id}${showContent.tts.voice_id ? "" : ", no default voice"})`;
+      } else {
+        note.className = "tts-note off";
+        note.textContent = "ElevenLabs off — set ELEVENLABS_API_KEY";
+      }
+      $("btn-tts-missing").disabled = !ttsReady();
+
+      const rows = $("editor-rows");
+      rows.innerHTML = "";
+      showContent.rounds.forEach((r, i) => rows.append(createEditorRow(r, i)));
+      $("editor-empty").style.display = showContent.rounds.length ? "none" : "block";
+    }
+
+    function audioCellHtml(r) {
+      if (!r.audio) return `<span class="audio-none">—</span>`;
+      if (!r.audio_exists) return `<span class="audio-missing">${esc(r.audio)} (missing)</span>`;
+      return `<span class="audio-ok"><a href="${esc(r.audio_url)}" target="_blank" title="Play">▶</a> ${esc(r.audio)}</span>`;
+    }
+
+    function createEditorRow(r, i) {
+      const frag = document.createDocumentFragment();
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="mono">${i + 1}</td>
+        <td class="mono">${esc(r.id)}</td>
+        <td><span class="tag ${r.type === "narration" ? "narration" : ""}">${esc(r.type === "narration" ? "narration" : r.form)}</span></td>
+        <td class="editor-q" title="${esc(r.question)}">${esc(r.question)}</td>
+        <td class="mono">${audioCellHtml(r)}</td>
+        <td></td>`;
+      const actions = document.createElement("div");
+      actions.className = "row-actions";
+      const editBtn = document.createElement("button");
+      editBtn.className = "small";
+      editBtn.textContent = "Edit";
+      editBtn.addEventListener("click", () => toggleEditor(r, tr));
+      const ttsBtn = document.createElement("button");
+      ttsBtn.className = "small";
+      ttsBtn.textContent = r.audio_exists ? "Re-generate voice" : "Generate voice";
+      ttsBtn.disabled = !ttsReady();
+      if (!ttsReady()) ttsBtn.title = "Set ELEVENLABS_API_KEY to enable";
+      ttsBtn.addEventListener("click", () => generateAudio(r.id, ttsBtn));
+      actions.append(editBtn, ttsBtn);
+      tr.lastElementChild.appendChild(actions);
+      frag.append(tr);
+      return frag;
+    }
+
+    function toggleEditor(r, tr) {
+      const existing = tr.nextElementSibling;
+      if (existing && existing.classList.contains("editor-row")) {
+        existing.remove();
+        tr.classList.remove("editor-open");
+        openEditorId = null;
+        return;
+      }
+      document.querySelectorAll("#editor-rows .editor-row").forEach((el) => {
+        el.previousElementSibling?.classList.remove("editor-open");
+        el.remove();
+      });
+      openEditorId = r.id;
+      tr.classList.add("editor-open");
+      const row = document.createElement("tr");
+      row.className = "editor-row";
+      const cell = document.createElement("td");
+      cell.colSpan = 6;
+      cell.appendChild(buildEditorForm(r));
+      row.appendChild(cell);
+      tr.after(row);
+    }
+
+    function buildEditorForm(r) {
+      const root = document.createElement("div");
+      root.className = "round-editor";
+
+      const field = (labelText, el) => {
+        const wrap = document.createElement("label");
+        wrap.className = "field";
+        const span = document.createElement("span");
+        span.textContent = labelText;
+        wrap.append(span, el);
+        return wrap;
+      };
+
+      const question = document.createElement("input");
+      question.value = r.question;
+      root.appendChild(field("Question / title", question));
+
+      const text = document.createElement("textarea");
+      text.rows = Math.min(14, Math.max(4, (r.text || "").split("\n").length + 1));
+      text.value = r.text || "";
+      root.appendChild(field("Narration text (spoken + shown; audio is generated from this)", text));
+
+      const audio = document.createElement("input");
+      audio.value = r.audio || "";
+      audio.placeholder = "file in content/audio/, e.g. k2_intro.mp3";
+      audio.classList.add("mono");
+
+      const duration = document.createElement("input");
+      duration.type = "number";
+      duration.step = "any";
+      duration.min = "0";
+      duration.value = r.duration_s;
+      const grace = document.createElement("input");
+      grace.type = "number";
+      grace.step = "any";
+      grace.min = "0";
+      grace.value = r.grace_s;
+
+      const timing = document.createElement("div");
+      timing.className = "field-grid";
+      timing.append(
+        field("Audio file", audio),
+        field("Duration (s, 0 = manual advance)", duration),
+        field("Grace (s)", grace),
+      );
+      root.appendChild(timing);
+
+      const labelInputs = {};
+      const labelKeys = Object.keys(r.form_labels || {});
+      if (labelKeys.length) {
+        const grid = document.createElement("div");
+        grid.className = "field-grid";
+        for (const key of labelKeys) {
+          const input = document.createElement("input");
+          input.value = r.form_labels[key];
+          labelInputs[key] = input;
+          grid.appendChild(field(`Label — ${key}`, input));
+        }
+        root.appendChild(field(`Form labels (${r.form})`, grid));
+      }
+
+      const optionInputs = [];
+      if ((r.options || []).length) {
+        const list = document.createElement("div");
+        list.style.display = "grid";
+        list.style.gap = "0.45rem";
+        for (const o of r.options) {
+          const row = document.createElement("div");
+          row.className = "option-row";
+          const zone = document.createElement("span");
+          zone.className = "zone-chip";
+          zone.textContent = o.zone;
+          const input = document.createElement("input");
+          input.value = o.label;
+          optionInputs.push({ option: o, input });
+          row.append(zone, input);
+          list.appendChild(row);
+        }
+        root.appendChild(field("Answer options (zones are hand-edited in show.yaml)", list));
+      }
+
+      const actionsEl = document.createElement("div");
+      actionsEl.className = "editor-actions";
+      const save = document.createElement("button");
+      save.className = "primary";
+      save.textContent = "Save to show.yaml";
+      const cancel = document.createElement("button");
+      cancel.className = "ghost";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", loadContent);
+      actionsEl.append(save, cancel);
+      root.appendChild(actionsEl);
+
+      save.addEventListener("click", async () => {
+        const fields = {
+          question: question.value.trim(),
+          text: text.value.trim() ? text.value : null,
+          audio: audio.value.trim() || null,
+          duration_s: parseFloat(duration.value),
+          grace_s: parseFloat(grace.value),
+        };
+        if (!fields.question) { toast("question must not be empty", true); return; }
+        if (!Number.isFinite(fields.duration_s) || !Number.isFinite(fields.grace_s)) {
+          toast("duration/grace must be numbers", true);
+          return;
+        }
+        if (labelKeys.length) {
+          fields.form_labels = Object.fromEntries(
+            labelKeys.map((k) => [k, labelInputs[k].value])
+          );
+        }
+        if (optionInputs.length) {
+          fields.options = optionInputs.map(({ option, input }) => ({
+            ...option, label: input.value,
+          }));
+        }
+        save.disabled = true;
+        try {
+          const resp = await fetch(`/api/admin/content/rounds/${encodeURIComponent(r.id)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(fields),
+          });
+          if (!resp.ok) {
+            const detail = (await resp.json().catch(() => ({}))).detail;
+            throw new Error(detail || `save failed (${resp.status})`);
+          }
+          const res = await resp.json();
+          toast(res.reloaded
+            ? `Saved ${r.id}`
+            : `Saved ${r.id} — not live yet (${res.detail}); reload content after the round`);
+          await loadContent();
+        } catch (err) {
+          toast(err.message, true);
+          save.disabled = false;
+        }
+      });
+
+      return root;
+    }
+
+    async function generateAudio(roundId, btn) {
+      const voiceOverride = $("tts-voice").value.trim();
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Generating…";
+      try {
+        const res = await post(
+          `/api/admin/content/rounds/${encodeURIComponent(roundId)}/tts`,
+          voiceOverride ? { voice_id: voiceOverride } : {},
+        );
+        toast(`Voice generated for ${roundId} (${(res.bytes / 1024).toFixed(0)} kB)${res.reloaded ? "" : " — reload content after the round"}`);
+        await loadContent();
+        return true;
+      } catch (err) {
+        toast(`${roundId}: ${err.message}`, true);
+        btn.disabled = false;
+        btn.textContent = original;
+        return false;
+      }
+    }
+
+    $("btn-tts-missing").addEventListener("click", async () => {
+      if (!showContent) return;
+      const missing = showContent.rounds.filter((r) => !r.audio_exists);
+      if (!missing.length) { toast("Every step already has audio"); return; }
+      if (!confirm(`Generate ElevenLabs audio for ${missing.length} step(s)? This uses API credits.`)) return;
+      const btn = $("btn-tts-missing");
+      btn.disabled = true;
+      for (let i = 0; i < missing.length; i++) {
+        btn.textContent = `Generating ${i + 1}/${missing.length}…`;
+        const ok = await generateAudio(missing[i].id, document.createElement("button"));
+        if (!ok) break; // the per-round toast already explains the failure
+      }
+      btn.textContent = "Generate missing audio";
+      btn.disabled = !ttsReady();
+    });
+
     async function refreshHealth() {
       try {
         const resp = await fetch("/health");
@@ -686,6 +1027,7 @@
     connectAdmin();
     connectTd();
     loadZones();
+    loadContent();
     refreshRound();
     refreshScores();
     refreshHealth();

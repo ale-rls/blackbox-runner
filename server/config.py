@@ -22,10 +22,16 @@ class Settings:
     position_history_seconds: float = 5.0
     db_path: str = "data/blackbox-runner.db"
     content_path: str = "content/show.yaml"
+    audio_dir: str = "content/audio"
     rebind_max_distance: float = 0.15
     rebind_max_gap_s: float = 8.0
     orphan_after_s: float = 3.0
     ritual_zone_id: Optional[str] = None
+    # ElevenLabs TTS for narration/question audio. Generation stays disabled
+    # (503 from the admin endpoint) until an API key is configured.
+    elevenlabs_api_key: Optional[str] = None
+    elevenlabs_voice_id: Optional[str] = None
+    elevenlabs_model_id: str = "eleven_multilingual_v2"
 
     @classmethod
     def load(cls) -> "Settings":
@@ -45,10 +51,14 @@ class Settings:
             ),
             db_path=os.environ.get("GAME_DB_PATH", cls.db_path),
             content_path=os.environ.get("GAME_CONTENT_PATH", cls.content_path),
+            audio_dir=os.environ.get("GAME_AUDIO_DIR", cls.audio_dir),
             rebind_max_distance=float(
                 os.environ.get("REBIND_MAX_DISTANCE", cls.rebind_max_distance)
             ),
             rebind_max_gap_s=float(os.environ.get("REBIND_MAX_GAP_S", cls.rebind_max_gap_s)),
             orphan_after_s=float(os.environ.get("ORPHAN_AFTER_S", cls.orphan_after_s)),
             ritual_zone_id=os.environ.get("RITUAL_ZONE_ID", cls.ritual_zone_id),
+            elevenlabs_api_key=os.environ.get("ELEVENLABS_API_KEY", cls.elevenlabs_api_key),
+            elevenlabs_voice_id=os.environ.get("ELEVENLABS_VOICE_ID", cls.elevenlabs_voice_id),
+            elevenlabs_model_id=os.environ.get("ELEVENLABS_MODEL_ID", cls.elevenlabs_model_id),
         )

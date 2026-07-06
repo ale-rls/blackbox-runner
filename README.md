@@ -58,7 +58,11 @@ web/
   admin/               # operator dashboard: round control, binding board,
                         # floor map, TD cue log, scoreboard
 content/
-  show.yaml            # rounds, questions, zone->answer mapping, timing
+  show.yaml            # steps: narration texts, questions, forms, zone mapping
+                       # (editable from the admin console's Show editor)
+  audio/               # voice-over mp3s, served at /audio/<name>.mp3
+                       # (override the folder with GAME_AUDIO_DIR; generate
+                       # via ElevenLabs from the admin console — see runbook)
 scripts/
   validate_content.py  # check show.yaml against a running TrackingBox's zones
   replay.py            # CLI for server/replay.py
@@ -89,10 +93,14 @@ make dev
 ```
 
 `dev/trackingbox.config.json` enables calibration (an identity mapping, since
-the mock backend has no real camera) and defines `answer_a`/`answer_b` zones
-matching `content/show.yaml`. Without it, `floor_valid` stays false and no
-round can ever be answered — only useful for Phase 0/1-style connectivity
-checks.
+the mock backend has no real camera) and defines the floor-marking zones
+(`scale_*`, `cross_*`, `ring_*`, plus the `ritual` corner) matching
+`content/show.yaml`. Without it, `floor_valid` stays false and no round can
+ever be answered — only useful for Phase 0/1-style connectivity checks.
+
+To enable ElevenLabs voice generation from the admin console, set
+`ELEVENLABS_API_KEY` (and usually `ELEVENLABS_VOICE_ID`; model defaults to
+`eleven_multilingual_v2`) — see `docs/runbook.md` for the workflow.
 
 `make dev` boots the game server against `ws://localhost:8000/ws`, loading
 `content/show.yaml` (validated against TrackingBox's `/api/zones` at

@@ -10,11 +10,29 @@ from server.app import create_app
 from server.config import Settings
 
 
+# A minimal scoreable show against conftest's answer_a/answer_b zones, so app
+# tests don't depend on the production script in content/show.yaml (whose
+# first step is an unscored narration monologue).
+_TEST_SHOW = (
+    "version: '1'\n"
+    "rounds:\n"
+    "  - id: r1\n"
+    "    question: Coffee or tea?\n"
+    "    options:\n"
+    "      - {zone: answer_a, label: Coffee}\n"
+    "      - {zone: answer_b, label: Tea}\n"
+)
+
+
 def _settings(fake_backend, fake_zones_http, tmp_path) -> Settings:
+    content_path = tmp_path / "show.yaml"
+    content_path.write_text(_TEST_SHOW)
     return Settings(
         tracking_ws_url=fake_backend.ws_url,
         tracking_http_url=fake_zones_http,
         db_path=str(tmp_path / "game.db"),
+        content_path=str(content_path),
+        audio_dir=str(tmp_path / "audio"),
     )
 
 
@@ -212,6 +230,119 @@ async def test_content_reload_endpoint(fake_backend, fake_zones_http, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_show_editor_endpoints(fake_backend, fake_zones_http, tmp_path):
+    settings = _settings(fake_backend, fake_zones_http, tmp_path)
+    app = create_app(settings)
+
+    async with LifespanManager(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/admin/content")
+            assert resp.status_code == 200
+            content = resp.json()
+            assert content["tts"]["configured"] is False
+            assert [r["id"] for r in content["rounds"]] == ["r1"]
+            assert content["rounds"][0]["audio_exists"] is False
+
+            # Edit between rounds: file + running engine both update.
+            resp = await client.put(
+                "/api/admin/content/rounds/r1", json={"question": "Beer or wine?"}
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["reloaded"] is True
+            assert body["round"]["question"] == "Beer or wine?"
+            assert "Beer or wine?" in (tmp_path / "show.yaml").read_text()
+            assert app.state.show.rounds[0].question == "Beer or wine?"
+
+            # Invalid edits are rejected and never reach the file.
+            before = (tmp_path / "show.yaml").read_text()
+            resp = await client.put("/api/admin/content/rounds/r1", json={"id": "r2"})
+            assert resp.status_code == 400
+            resp = await client.put(
+                "/api/admin/content/rounds/r1",
+                json={"options": [{"zone": "bogus_zone", "label": "X"}]},
+            )
+            assert resp.status_code == 400
+            assert (tmp_path / "show.yaml").read_text() == before
+
+            resp = await client.put("/api/admin/content/rounds/ghost", json={"question": "?"})
+            assert resp.status_code == 400
+
+            # Mid-round: the edit is saved to the file but not hot-applied.
+            assert (await client.post("/api/admin/rounds/start")).status_code == 200
+            resp = await client.put(
+                "/api/admin/content/rounds/r1", json={"question": "Mid-round edit"}
+            )
+            assert resp.status_code == 200
+            assert resp.json()["reloaded"] is False
+            assert "Mid-round edit" in (tmp_path / "show.yaml").read_text()
+            assert app.state.show.rounds[0].question == "Beer or wine?"
+
+
+@pytest.mark.asyncio
+async def test_tts_endpoint_requires_configuration(fake_backend, fake_zones_http, tmp_path):
+    app = create_app(_settings(fake_backend, fake_zones_http, tmp_path))
+
+    async with LifespanManager(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/api/admin/content/rounds/r1/tts")
+            assert resp.status_code == 503
+            assert "ELEVENLABS_API_KEY" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_tts_endpoint_generates_and_wires_audio(
+    fake_backend, fake_zones_http, tmp_path, monkeypatch
+):
+    import dataclasses
+
+    import server.tts
+
+    calls = {}
+
+    async def fake_synthesize(text, *, api_key, voice_id, model_id, client=None):
+        calls.update(text=text, api_key=api_key, voice_id=voice_id, model_id=model_id)
+        return b"ID3fake-mp3"
+
+    monkeypatch.setattr(server.tts, "synthesize", fake_synthesize)
+
+    settings = dataclasses.replace(
+        _settings(fake_backend, fake_zones_http, tmp_path),
+        elevenlabs_api_key="k-123",
+    )
+    app = create_app(settings)
+
+    async with LifespanManager(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            # Key set but no voice anywhere → the operator must pick one.
+            resp = await client.post("/api/admin/content/rounds/r1/tts")
+            assert resp.status_code == 400
+
+            resp = await client.post(
+                "/api/admin/content/rounds/r1/tts", json={"voice_id": "voice-9"}
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["audio"] == "r1.mp3"
+            assert body["reloaded"] is True
+            assert calls["voice_id"] == "voice-9"
+            assert calls["text"] == "Coffee or tea?"  # no text: falls back to question
+
+            # mp3 landed in the audio dir and is served; show.yaml points at it.
+            assert (tmp_path / "audio" / "r1.mp3").read_bytes() == b"ID3fake-mp3"
+            assert (await client.get("/audio/r1.mp3")).content == b"ID3fake-mp3"
+            assert app.state.show.rounds[0].audio == "r1.mp3"
+            content = (await client.get("/api/admin/content")).json()
+            assert content["rounds"][0]["audio_exists"] is True
+
+            resp = await client.post("/api/admin/content/rounds/ghost/tts")
+            assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_player_page_served(fake_backend, fake_zones_http, tmp_path):
     app = create_app(_settings(fake_backend, fake_zones_http, tmp_path))
 
@@ -220,4 +351,22 @@ async def test_player_page_served(fake_backend, fake_zones_http, tmp_path):
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/p/seat-1")
             assert resp.status_code == 200
-            assert b"Claim" in resp.content
+            assert "KI-Blackbox".encode() in resp.content
+
+
+@pytest.mark.asyncio
+async def test_audio_files_served_from_audio_dir(fake_backend, fake_zones_http, tmp_path):
+    settings = _settings(fake_backend, fake_zones_http, tmp_path)
+    app = create_app(settings)
+    # create_app made the dir; drop a narration mp3 in as the operator would.
+    (tmp_path / "audio" / "k2_intro.mp3").write_bytes(b"ID3fake-mp3-bytes")
+
+    async with LifespanManager(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/audio/k2_intro.mp3")
+            assert resp.status_code == 200
+            assert resp.headers["content-type"] == "audio/mpeg"
+            assert resp.content == b"ID3fake-mp3-bytes"
+
+            assert (await client.get("/audio/missing.mp3")).status_code == 404

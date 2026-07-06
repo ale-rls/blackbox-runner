@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import show_store, tts
 from .bindings import BindingError, BindingManager, PlayerState
 from .config import Settings
 from .content import ContentError, ShowContent, load_show
@@ -87,6 +88,10 @@ class RebindRequest(BaseModel):
 
 class CueRequest(BaseModel):
     payload: dict = {}
+
+
+class TTSRequest(BaseModel):
+    voice_id: Optional[str] = None
 
 
 _EMPTY_SHOW = ShowContent(rounds=[])
@@ -270,6 +275,123 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.show = show
         return {"ok": True, "rounds": len(show.rounds)}
 
+    # -------------------------------------------------------------- #
+    # Admin — show editor (content/show.yaml is the source of truth;
+    # edits are written back there, not into the running engine)
+    # -------------------------------------------------------------- #
+    def _edit_zone_ids() -> Optional[set[str]]:
+        # Mirror startup validation when TrackingBox's zones are known, but
+        # don't block show prep on a dead sensor: without a zone map every
+        # option would look "unknown" and nothing could ever be saved.
+        zones: ZoneMap = app.state.zones
+        return zones.zone_ids() if zones.enabled else None
+
+    def _reload_engine(show: ShowContent) -> tuple[bool, Optional[str]]:
+        """Apply a freshly saved show to the engine if between rounds. The
+        file write already happened either way — an edit made mid-round is
+        kept, it just applies on the next reload."""
+        try:
+            app.state.engine.reload_show(show)
+        except EngineError as exc:
+            return False, str(exc)
+        app.state.show = show
+        return True, None
+
+    @app.get("/api/admin/content")
+    async def get_content() -> dict:
+        try:
+            show = await asyncio.to_thread(load_show, settings.content_path)
+        except (ContentError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        audio_dir = Path(settings.audio_dir)
+        rounds = []
+        for r in show.rounds:
+            dump = r.model_dump()
+            dump["audio_url"] = f"/audio/{r.audio}" if r.audio else None
+            dump["audio_exists"] = bool(r.audio) and (audio_dir / r.audio).is_file()
+            rounds.append(dump)
+        return {
+            "version": show.version,
+            "path": settings.content_path,
+            "rounds": rounds,
+            "tts": {
+                "configured": bool(settings.elevenlabs_api_key),
+                "voice_id": settings.elevenlabs_voice_id,
+                "model_id": settings.elevenlabs_model_id,
+            },
+        }
+
+    @app.put("/api/admin/content/rounds/{round_id}")
+    async def update_round(round_id: str, fields: dict) -> dict:
+        try:
+            show = await asyncio.to_thread(
+                show_store.update_round,
+                settings.content_path,
+                round_id,
+                fields,
+                valid_zone_ids=_edit_zone_ids(),
+            )
+        except ContentError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        reloaded, detail = _reload_engine(show)
+        updated = next(r for r in show.rounds if r.id == round_id)
+        return {"ok": True, "reloaded": reloaded, "detail": detail, "round": updated.model_dump()}
+
+    @app.post("/api/admin/content/rounds/{round_id}/tts")
+    async def generate_round_audio(round_id: str, body: Optional[TTSRequest] = None) -> dict:
+        if not settings.elevenlabs_api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="ElevenLabs is not configured — set ELEVENLABS_API_KEY",
+            )
+        # Read from the file, not the running engine: an edit saved mid-round
+        # (reloaded: false) must still be what gets narrated.
+        try:
+            show = await asyncio.to_thread(load_show, settings.content_path)
+        except (ContentError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        round_ = next((r for r in show.rounds if r.id == round_id), None)
+        if round_ is None:
+            raise HTTPException(status_code=404, detail=f"unknown round {round_id!r}")
+        text = round_.text or round_.question
+        if not text:
+            raise HTTPException(status_code=400, detail=f"round {round_id!r} has no text")
+        voice_id = (body.voice_id if body else None) or settings.elevenlabs_voice_id
+        if not voice_id:
+            raise HTTPException(
+                status_code=400,
+                detail="no voice selected — set ELEVENLABS_VOICE_ID or pass voice_id",
+            )
+
+        try:
+            audio_bytes = await tts.synthesize(
+                text,
+                api_key=settings.elevenlabs_api_key,
+                voice_id=voice_id,
+                model_id=settings.elevenlabs_model_id,
+            )
+        except tts.TTSError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        filename = f"{round_id}.mp3"
+        await asyncio.to_thread((Path(settings.audio_dir) / filename).write_bytes, audio_bytes)
+        show = await asyncio.to_thread(
+            show_store.update_round,
+            settings.content_path,
+            round_id,
+            {"audio": filename},
+            valid_zone_ids=_edit_zone_ids(),
+        )
+        reloaded, detail = _reload_engine(show)
+        return {
+            "ok": True,
+            "audio": filename,
+            "audio_url": f"/audio/{filename}",
+            "bytes": len(audio_bytes),
+            "reloaded": reloaded,
+            "detail": detail,
+        }
+
     @app.post("/api/admin/rounds/start")
     async def start_round() -> dict:
         try:
@@ -367,6 +489,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     if (_WEB_DIR / "admin").is_dir():
         app.mount("/admin", StaticFiles(directory=_WEB_DIR / "admin", html=True), name="admin")
+
+    # Narration mp3s referenced by content/show.yaml's ``audio:`` field.
+    audio_dir = Path(settings.audio_dir)
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/audio", StaticFiles(directory=audio_dir), name="audio")
 
     return app
 

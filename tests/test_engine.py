@@ -438,3 +438,95 @@ async def test_reload_show_allowed_after_round_done(engine):
     await engine.reveal_round()
     engine.reload_show(ShowContent.model_validate(NEW_SHOW))
     assert engine.show.rounds[0].id == "r1-updated"
+
+
+# ---------------------------------------------------------------------- #
+# Narration steps (text + audio over headphones, no answers)
+# ---------------------------------------------------------------------- #
+
+NARRATION_SHOW = {
+    "version": "1",
+    "rounds": [
+        {
+            "id": "k2_intro",
+            "question": "Modell-Intro",
+            "type": "narration",
+            "duration_s": 0,
+            "grace_s": 0,
+            "points": 0,
+            "text": "Hallo, herzlich willkommen.",
+            "audio": "k2_intro.mp3",
+        },
+        {
+            "id": "arbeit_1",
+            "question": "Wie fühlt sich deine Arbeit an?",
+            "type": "majority",
+            "duration_s": 100,
+            "grace_s": 100,
+            "points": 0,
+            "form": "scale",
+            "form_labels": {"left": "Ich liebe diese Arbeit", "right": "nicht auszuhalten"},
+            "text": "Positioniere dich auf der rosa Skala.",
+            "options": [{"zone": "a", "label": "A"}, {"zone": "b", "label": "B"}],
+        },
+    ],
+}
+
+
+@pytest.mark.asyncio
+async def test_narration_round_payload_carries_text_and_audio(db, tracking):
+    session_id = db.create_session()
+    bindings = await BindingManager.load(db, session_id, tracking)
+    engine = GameEngine(db, session_id, ShowContent.model_validate(NARRATION_SHOW), bindings, tracking)
+
+    queue = engine.subscribe()
+    await engine.start_next_round()
+    event = await asyncio.wait_for(queue.get(), timeout=1)
+    assert event.type == "round_opened"
+    assert event.payload["round_type"] == "narration"
+    assert event.payload["text"] == "Hallo, herzlich willkommen."
+    assert event.payload["audio_url"] == "/audio/k2_intro.mp3"
+    assert event.payload["options"] == []
+
+
+@pytest.mark.asyncio
+async def test_narration_round_has_no_auto_close_timer(db, tracking):
+    session_id = db.create_session()
+    bindings = await BindingManager.load(db, session_id, tracking)
+    engine = GameEngine(db, session_id, ShowContent.model_validate(NARRATION_SHOW), bindings, tracking)
+
+    await engine.start_next_round()
+    assert engine._timer_task is None  # duration_s == 0 -> operator advances
+    assert engine._zone_task is None  # no zones to count during narration
+
+
+@pytest.mark.asyncio
+async def test_narration_reveal_records_no_answers_or_scores(db, tracking):
+    session_id = db.create_session()
+    bindings = await BindingManager.load(db, session_id, tracking)
+    engine = GameEngine(db, session_id, ShowContent.model_validate(NARRATION_SHOW), bindings, tracking)
+    await _claim_bound(bindings, tracking, "p1", 1, "a")
+
+    rt = await engine.start_next_round()
+    await engine.reveal_round()  # operator "finish step" straight from active
+    assert rt.state == RoundState.DONE
+    assert rt.answers == {}
+    assert db.load_answers(rt.row_id) == []
+    assert db.load_score_events(session_id) == []
+
+
+@pytest.mark.asyncio
+async def test_question_round_payload_carries_form_metadata(db, tracking):
+    session_id = db.create_session()
+    bindings = await BindingManager.load(db, session_id, tracking)
+    engine = GameEngine(db, session_id, ShowContent.model_validate(NARRATION_SHOW), bindings, tracking)
+
+    await engine.start_next_round()
+    await engine.reveal_round()
+
+    rt = await engine.start_next_round()  # arbeit_1
+    payload = engine.round_payload(rt)
+    assert payload["form"] == "scale"
+    assert payload["form_labels"]["left"] == "Ich liebe diese Arbeit"
+    assert payload["text"] == "Positioniere dich auf der rosa Skala."
+    assert payload["audio_url"] is None

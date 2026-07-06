@@ -239,9 +239,13 @@ class GameEngine:
 
         self._publish(EngineEvent("round_opened", self.round_payload(rt)))
         self._cancel_timer()
-        self._timer_task = asyncio.create_task(self._run_active_timer(rt))
+        # duration_s <= 0 means "no auto-close": narration monologues and
+        # untimed steps stay active until the operator advances them.
+        if content.duration_s > 0:
+            self._timer_task = asyncio.create_task(self._run_active_timer(rt))
         self._cancel_zone_task()
-        self._zone_task = asyncio.create_task(self._run_zone_counts(rt))
+        if content.type != "narration":
+            self._zone_task = asyncio.create_task(self._run_zone_counts(rt))
         return rt
 
     async def close_round(self) -> RoundRuntime:
@@ -322,13 +326,16 @@ class GameEngine:
             self._db.update_round_state, rt.row_id, RoundState.CLOSING.value, rt.opened_at, rt.closed_at
         )
 
-        valid_zones = {opt.zone for opt in rt.content.options}
-        for player in self._bindings.all_players():
-            zone = self._current_zone(player)
-            if zone in valid_zones:
-                await self._set_answer(rt, player.id, zone, "answered")
-            else:
-                await self._set_answer(rt, player.id, None, "absent")
+        # Narration has no answers to capture — every player would just be
+        # recorded absent, polluting the answers table.
+        if rt.content.type != "narration":
+            valid_zones = {opt.zone for opt in rt.content.options}
+            for player in self._bindings.all_players():
+                zone = self._current_zone(player)
+                if zone in valid_zones:
+                    await self._set_answer(rt, player.id, zone, "answered")
+                else:
+                    await self._set_answer(rt, player.id, None, "absent")
 
         self._publish(EngineEvent("round_closing", self.round_payload(rt)))
 
@@ -435,7 +442,15 @@ class GameEngine:
             "round_id": rt.content.id,
             "index": rt.index,
             "state": rt.state.value,
+            # Named round_type (not "type"): the player/TD WS wraps this
+            # payload as {"type": <event name>, **payload}, so a "type" key
+            # here would clobber the event name.
+            "round_type": rt.content.type,
             "question": rt.content.question,
+            "text": rt.content.text,
+            "audio_url": f"/audio/{rt.content.audio}" if rt.content.audio else None,
+            "form": rt.content.form,
+            "form_labels": rt.content.form_labels,
             "options": [{"zone": o.zone, "label": o.label} for o in rt.content.options],
             "duration_s": rt.content.duration_s,
             "grace_s": rt.content.grace_s,
