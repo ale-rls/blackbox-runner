@@ -76,6 +76,78 @@ async def test_reconnect_resyncs_from_fresh_snapshot(fake_backend):
 
 
 @pytest.mark.asyncio
+async def test_batched_update_message_applies_each_person():
+    """The live TrackingBox sends changes as {"type": "update", "people": [...]}
+    batches; each entry must be applied as an individual change event."""
+    import json
+
+    client = TrackingClient("ws://unused")
+    queue = client.subscribe()
+    try:
+        update = {
+            "type": "update",
+            "people": [
+                {
+                    "gid": 32,
+                    "visible": True,
+                    "center": [580, 191],
+                    "bbox": [541, 66, 620, 315],
+                    "floor": [0.7585, 0.5284],
+                    "floor_valid": True,
+                    "zone": "cross_br",
+                },
+                {
+                    "gid": 33,
+                    "visible": True,
+                    "center": [100, 200],
+                    "bbox": [90, 150, 110, 250],
+                    "floor": [0.25, 0.5],
+                    "floor_valid": True,
+                    "zone": "answer_a",
+                },
+            ],
+        }
+        client._handle_message(json.dumps(update))
+
+        # Both GIDs' state updated.
+        assert client.get(32) is not None
+        assert client.get(32).floor == (0.7585, 0.5284)
+        assert client.get(32).zone == "cross_br"
+        assert client.get(33) is not None
+        assert client.get(33).zone == "answer_a"
+
+        # One ChangeEvent published per person, in order.
+        events = [queue.get_nowait() for _ in range(2)]
+        assert all(isinstance(e, ChangeEvent) for e in events)
+        assert [e.gid for e in events] == [32, 33]
+        assert events[0].state is not None and events[1].state is not None
+
+        # A subsequent update batch can also remove a GID (visible: false).
+        gone = {
+            "type": "update",
+            "people": [
+                {
+                    "gid": 33,
+                    "visible": False,
+                    "center": None,
+                    "bbox": None,
+                    "floor": None,
+                    "floor_valid": False,
+                    "zone": None,
+                }
+            ],
+        }
+        client._handle_message(json.dumps(gone))
+        assert client.get(33) is None
+        event = queue.get_nowait()
+        assert isinstance(event, ChangeEvent)
+        assert event.gid == 33
+        assert event.state is None
+    finally:
+        client.unsubscribe(queue)
+
+
+@pytest.mark.asyncio
 async def test_fetch_zones_parses_response(fake_zones_http):
     from server.tracking_client import fetch_zones
 

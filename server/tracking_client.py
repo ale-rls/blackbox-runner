@@ -170,6 +170,10 @@ class TrackingClient:
             return
         if isinstance(msg, dict) and msg.get("type") == "snapshot":
             self._apply_snapshot(msg.get("data") or {})
+        elif isinstance(msg, dict) and msg.get("type") == "update":
+            for person in msg.get("people") or []:
+                if isinstance(person, dict):
+                    self._apply_change(person)
         elif isinstance(msg, dict) and "gid" in msg:
             self._apply_change(msg)
         else:

@@ -43,16 +43,23 @@ and never modify it for game features.
 
 ### TrackingBox WS contract (as pinned)
 
-The `/ws` endpoint sends one of two shapes, undiscriminated except by the
-presence of `type`:
+The `/ws` endpoint sends one of three shapes, discriminated by the
+presence and value of `type`:
 
 * `{"type": "snapshot", "data": {...}}` — full snapshot, sent once on
   connect and again on every heartbeat (`ws_heartbeat_interval_s`, default
   10s) if no change events arrived in that window.
+* `{"type": "update", "people": [{...}, ...]}` — a batched change event:
+  a list of one or more per-GID entries, each shaped like the bare change
+  event below. **The currently-running TrackingBox instance sends only this
+  batched form for changes**, never the bare per-GID dict; the client
+  applies each entry in `people` as an individual change.
 * A bare per-GID change event with no `type` key:
   `{"gid": int, "visible": bool, "center": [x,y]|null, "bbox": [...]|null,
   "floor": [x,y]|null, "floor_valid": bool, "zone": str|null}`. A GID
   dropping out of the snapshot entirely is emitted as `visible: false`.
+  The client still supports this shape for back-compat with older
+  TrackingBox versions.
 
 `floor` is calibrated floor-space `[x, y]`, used for zone lookups. `zone` is
 already resolved server-side by TrackingBox's `ZoneMap` (first enabled zone
