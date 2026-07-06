@@ -155,7 +155,7 @@
 
     /* Floor map */
     .floor-map { width: 100%; aspect-ratio: 1; background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 0.6rem; display: block; }
-    .floor-map .zone { fill: rgba(109, 116, 246, 0.05); stroke: rgba(109, 116, 246, 0.35); stroke-width: 0.3; }
+    .floor-map .zone { fill: none; stroke: rgba(109, 116, 246, 0.35); stroke-width: 0.3; }
     .floor-map .zone-label { fill: var(--muted); font-size: 3px; font-family: var(--mono); letter-spacing: 0.05em; }
     .floor-map .p-label { fill: var(--text); font-size: 3.2px; font-family: var(--mono); paint-order: stroke; stroke: rgba(10, 10, 16, 0.8); stroke-width: 0.8; }
     .floor-map .gid-label { fill: var(--muted); font-size: 2.6px; font-family: var(--mono); }
@@ -483,31 +483,53 @@
     }
 
     // ---------------------------------------------------------------- //
-    // Floor map: zone outlines (fetched once) + live dots.
+    // Floor map: the current round's zone layout + live dots. Each question
+    // divides the whole floor into its own shape (circles, x/y bands,
+    // quadrants) — with no round in flight the floor is unmarked.
     // Bound players use the live audience position for their GID when
     // available; lost/orphaned players show at their last-seen spot.
     // ---------------------------------------------------------------- //
     let audience = [];
     let liveGids = new Set();
+    let drawnLayoutKey = null;
 
-    async function loadZones() {
-      try {
-        const resp = await fetch("/api/tracking/zones");
-        if (!resp.ok) throw new Error();
-        const map = await resp.json();
-        $("zone-layer").innerHTML = (map.zones || [])
-          .map((z) => {
-            const pts = (z.points || []).map(([x, y]) => `${(x * 100).toFixed(1)},${(y * 100).toFixed(1)}`).join(" ");
-            if (!pts) return "";
-            const cx = z.points.reduce((s, [x]) => s + x, 0) / z.points.length;
-            const cy = z.points.reduce((s, [, y]) => s + y, 0) / z.points.length;
-            return `<polygon class="zone" points="${pts}"></polygon>
-              <text class="zone-label" x="${(cx * 100).toFixed(1)}" y="${(cy * 100).toFixed(1)}" text-anchor="middle">${esc(z.id)}</text>`;
-          })
-          .join("");
-      } catch (err) {
-        setTimeout(loadZones, 5000); // TrackingBox may not be up yet
+    function drawZoneLayer() {
+      const r = currentRound;
+      const active = r && r.zone_layout && r.state !== "done";
+      const key = active ? `${r.round_id}:${r.zone_layout}:${r.state}` : null;
+      if (key === drawnLayoutKey) return;
+      drawnLayoutKey = key;
+      if (!active) { $("zone-layer").innerHTML = ""; return; }
+
+      const opts = r.options || [];
+      const n = opts.length;
+      const parts = [];
+      const line = (x1, y1, x2, y2) =>
+        parts.push(`<line class="zone" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`);
+      const label = (x, y, text) =>
+        parts.push(`<text class="zone-label" x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="middle">${esc(text)}</text>`);
+
+      switch (r.zone_layout) {
+        case "x_axis": // options left -> right in equal bands
+          for (let i = 1; i < n; i++) line((i / n) * 100, 0, (i / n) * 100, 100);
+          opts.forEach((o, i) => label(((i + 0.5) / n) * 100, 50, o.zone));
+          break;
+        case "y_axis": // options top -> bottom in equal bands
+          for (let i = 1; i < n; i++) line(0, (i / n) * 100, 100, (i / n) * 100);
+          opts.forEach((o, i) => label(50, ((i + 0.5) / n) * 100, o.zone));
+          break;
+        case "quadrants": // options tl, tr, bl, br
+          line(50, 0, 50, 100);
+          line(0, 50, 100, 50);
+          opts.forEach((o, i) => label(i % 2 ? 75 : 25, i < 2 ? 25 : 75, o.zone));
+          break;
+        case "circles": // options center -> edge in equal-width rings
+          for (let i = 1; i <= n; i++)
+            parts.push(`<circle class="zone" cx="50" cy="50" r="${(i / n) * 50}"></circle>`);
+          opts.forEach((o, i) => label(50, 50 + ((i + 0.5) / n) * 50, o.zone));
+          break;
       }
+      $("zone-layer").innerHTML = parts.join("");
     }
 
     async function refreshAudience() {
@@ -617,6 +639,7 @@
         const resp = await fetch("/api/rounds/current");
         currentRound = resp.ok ? await resp.json() : null;
         renderRoundCard();
+        drawZoneLayer();
       } catch (err) { /* try again next tick */ }
     }
 
@@ -1026,7 +1049,6 @@
     // ---------------------------------------------------------------- //
     connectAdmin();
     connectTd();
-    loadZones();
     loadContent();
     refreshRound();
     refreshScores();

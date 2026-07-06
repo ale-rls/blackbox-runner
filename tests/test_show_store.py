@@ -39,6 +39,18 @@ rounds:
         label: "Coffee"
       - zone: answer_b
         label: "Tea"
+
+  - id: q2
+    question: "Pick a corner"
+    type: majority
+    duration_s: 45
+    grace_s: 5
+    points: 0
+    options:
+      - zone: answer_a
+        label: "A"
+      - zone: answer_b
+        label: "B"
 """
 
 
@@ -52,7 +64,7 @@ def show_path(tmp_path):
 def test_update_question_preserves_comments_and_other_rounds(show_path):
     show = update_round(show_path, "q1", {"question": "Beer or wine?"})
 
-    assert [r.id for r in show.rounds] == ["intro", "q1"]
+    assert [r.id for r in show.rounds] == ["intro", "q1", "q2"]
     assert show.rounds[1].question == "Beer or wine?"
     text = show_path.read_text()
     assert "# K2 — Intro" in text  # comments survive the round-trip
@@ -100,11 +112,13 @@ def test_invalid_edit_leaves_file_untouched(show_path):
 
 
 def test_zone_validation_applies_when_zone_ids_given(show_path):
+    # q2 is a "choice" round (no zone_layout), so its zones must exist in
+    # TrackingBox's map; layout rounds like q1 use logical per-question zones.
     before = show_path.read_text()
     with pytest.raises(ContentError):
         update_round(
             show_path,
-            "q1",
+            "q2",
             {"options": [{"zone": "nope", "label": "X"}, {"zone": "answer_b", "label": "Y"}]},
             valid_zone_ids={"answer_a", "answer_b"},
         )

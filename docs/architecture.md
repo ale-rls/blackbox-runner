@@ -56,10 +56,14 @@ presence of `type`:
 
 `floor` is calibrated floor-space `[x, y]`, used for zone lookups. `zone` is
 already resolved server-side by TrackingBox's `ZoneMap` (first enabled zone
-containing the point wins; falls back to `default_zone` if configured). The
-game server still needs `/api/zones` for the zone map so answer options in
-`content/show.yaml` can validate zone IDs and the admin dashboard can render
-the floor.
+containing the point wins; falls back to `default_zone` if configured) —
+the game layer uses it for the ritual corner and for "choice" rounds.
+Question rounds instead carry a per-question `zone_layout` (`server/zones.py`)
+that divides the whole floor into that question's shape — concentric
+`circles`, `x_axis`/`y_axis` bands, or `quadrants` — and resolve each
+player's answer zone from `floor` directly, so TrackingBox's static zone map
+doesn't have to carve every shape into the floor at once. The game server
+still fetches `/api/zones` so "choice" options can validate zone IDs.
 
 ## 2. Repo layout
 
@@ -108,8 +112,11 @@ transition, so a crashed game server reloads mid-show exactly where it died.
   corrections are just more events.
 
 Questions/rounds live in `content/show.yaml` (editable by non-programmers,
-hot-reloaded between rounds), validated on load: every answer option must
-reference a zone ID that exists in TrackingBox's `/api/zones`.
+hot-reloaded between rounds), validated on load: rounds with a `zone_layout`
+must have an option count their layout supports (options are ordered along
+the layout — left→right, top→bottom, tl/tr/bl/br, center→edge); "choice"
+round options must reference a zone ID that exists in TrackingBox's
+`/api/zones`.
 
 ## 4. Core components
 
@@ -152,8 +159,10 @@ Per-player state machine: `unclaimed -> bound -> lost -> (bound | orphaned) -> b
 * Round state machine driven by `content/show.yaml` + operator commands
   (auto-advance timers with manual override always available).
 * Answer evaluation: at `closing`, take one authoritative position
-  snapshot; map each bound player's floor point through the zone map (same
-  first-match semantics as TrackingBox's `ZoneMap`). Players in
+  snapshot; resolve each bound player's floor point through the round's
+  `zone_layout` (circles / x_axis / y_axis / quadrants over the whole
+  floor; `server/zones.py`), or through TrackingBox's live `zone` for
+  "choice" rounds. Players in
   `lost/orphaned` state at close are recorded `absent`, never wrong — with
   an optional short grace window: if they rebind within N seconds and their
   GID was continuously inside one zone, upgrade to `late_grace`. This

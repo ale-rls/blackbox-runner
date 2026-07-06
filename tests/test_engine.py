@@ -530,3 +530,81 @@ async def test_question_round_payload_carries_form_metadata(db, tracking):
     assert payload["form_labels"]["left"] == "Ich liebe diese Arbeit"
     assert payload["text"] == "Positioniere dich auf der rosa Skala."
     assert payload["audio_url"] is None
+    assert payload["zone_layout"] == "x_axis"
+
+
+# ---------------------------------------------------------------------- #
+# Per-question zone layouts: answers resolve from floor positions, not
+# TrackingBox's static zone map (server/zones.py).
+# ---------------------------------------------------------------------- #
+
+RINGS_SHOW = {
+    "version": "1",
+    "rounds": [
+        {
+            "id": "rings1",
+            "question": "Wie verbunden fühlst du dich?",
+            "type": "majority",
+            "duration_s": 100,
+            "grace_s": 100,
+            "points": 10,
+            "form": "rings",
+            "form_labels": {"center": "sehr verbunden", "edge": "sehr isoliert"},
+            "options": [
+                {"zone": "ring_center", "label": "sehr verbunden"},
+                {"zone": "ring_mid", "label": "teils verbunden"},
+                {"zone": "ring_outer", "label": "sehr isoliert"},
+            ],
+        }
+    ],
+}
+
+
+def _seed_floor(tracking: TrackingClient, gid: int, x: float, y: float, valid: bool = True) -> None:
+    tracking._state[gid] = AudienceSummary(
+        gid=gid, visible=True, floor=(x, y), floor_valid=valid, zone=None
+    )
+
+
+@pytest.mark.asyncio
+async def test_layout_round_resolves_answers_from_floor_positions(db, tracking):
+    session_id = db.create_session()
+    bindings = await BindingManager.load(db, session_id, tracking)
+    engine = GameEngine(
+        db, session_id, ShowContent.model_validate(RINGS_SHOW), bindings, tracking,
+        zone_count_interval_s=0.05,
+    )
+
+    _seed_floor(tracking, 1, 0.5, 0.5)  # dead center
+    _seed_floor(tracking, 2, 0.5, 0.75)  # halfway out
+    _seed_floor(tracking, 3, 0.02, 0.02)  # floor corner, beyond the outer ring
+    await bindings.claim("p1", 1)
+    await bindings.claim("p2", 2)
+    await bindings.claim("p3", 3)
+
+    await engine.start_next_round()
+    assert engine.current_zone_counts() == {"ring_center": 1, "ring_mid": 1, "ring_outer": 1}
+
+    await engine.close_round()
+    rt = await engine.reveal_round()
+    assert rt.answers["p1"] == ("ring_center", "answered")
+    assert rt.answers["p2"] == ("ring_mid", "answered")
+    assert rt.answers["p3"] == ("ring_outer", "answered")
+
+
+@pytest.mark.asyncio
+async def test_layout_round_marks_invalid_floor_absent(db, tracking):
+    session_id = db.create_session()
+    bindings = await BindingManager.load(db, session_id, tracking)
+    engine = GameEngine(
+        db, session_id, ShowContent.model_validate(RINGS_SHOW), bindings, tracking,
+        zone_count_interval_s=0.05,
+    )
+
+    _seed_floor(tracking, 1, 0.5, 0.5, valid=False)
+    await bindings.claim("p1", 1)
+
+    await engine.start_next_round()
+    await engine.close_round()
+    rt = await engine.reveal_round()
+    assert rt.answers["p1"] == (None, "absent")
