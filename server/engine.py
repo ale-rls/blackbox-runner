@@ -1,11 +1,13 @@
 """Round state machine, timing, zone evaluation, and scoring
 (docs/architecture.md §4.3).
 
-Zone evaluation reads TrackingBox's own live ``zone`` field for each bound
-player's GID rather than re-implementing point-in-polygon matching: the
-zone map fetched at startup is used only to validate content (server.content),
-not to re-derive what TrackingBox already computes with identical
-first-match semantics.
+Zone evaluation is per question: rounds with a ``zone_layout`` divide the
+whole floor into that round's shape (server.zones) and each bound player's
+answer zone is resolved from their live floor position. Rounds without a
+layout ("choice" form) fall back to TrackingBox's own live ``zone`` field —
+there the zone map fetched at startup is used only to validate content
+(server.content), not to re-derive what TrackingBox already computes with
+identical first-match semantics.
 
 State machine per round: pending -> active -> closing -> revealed -> done.
 At ``closing`` every bound player's current zone is captured as their
@@ -27,6 +29,7 @@ from .bindings import BindingManager, PlayerState
 from .content import RoundContent, ShowContent
 from .persistence import AnswerRow, Database
 from .tracking_client import TrackingClient
+from .zones import resolve_zone
 
 log = logging.getLogger("blackbox_runner.engine")
 
@@ -196,7 +199,7 @@ class GameEngine:
             return {}
         counts = {opt.zone: 0 for opt in rt.content.options}
         for player in self._bindings.all_players():
-            zone = self._current_zone(player)
+            zone = self._current_zone(player, rt)
             if zone in counts:
                 counts[zone] += 1
         return counts
@@ -290,7 +293,7 @@ class GameEngine:
             while self._current is rt and rt.state == RoundState.ACTIVE:
                 counts = {zone: 0 for zone in zones}
                 for player in self._bindings.all_players():
-                    zone = self._current_zone(player)
+                    zone = self._current_zone(player, rt)
                     if zone in counts:
                         counts[zone] += 1
                 self._publish(EngineEvent("zone_counts", {"round_id": rt.content.id, "counts": counts}))
@@ -331,7 +334,7 @@ class GameEngine:
         if rt.content.type != "narration":
             valid_zones = {opt.zone for opt in rt.content.options}
             for player in self._bindings.all_players():
-                zone = self._current_zone(player)
+                zone = self._current_zone(player, rt)
                 if zone in valid_zones:
                     await self._set_answer(rt, player.id, zone, "answered")
                 else:
@@ -349,7 +352,7 @@ class GameEngine:
             _, resolved = rt.answers.get(player.id, (None, "absent"))
             if resolved not in ("absent",):
                 continue
-            new_zone = self._current_zone(player)
+            new_zone = self._current_zone(player, rt)
             if new_zone in valid_zones:
                 await self._set_answer(rt, player.id, new_zone, "late_grace")
 
@@ -391,11 +394,18 @@ class GameEngine:
             self._db.update_round_state, rt.row_id, RoundState.DONE.value, rt.opened_at, rt.closed_at
         )
 
-    def _current_zone(self, player) -> Optional[str]:
+    def _current_zone(self, player, rt: RoundRuntime) -> Optional[str]:
         if player.state != PlayerState.BOUND or player.gid is None:
             return None
         state = self._tracking.get(player.gid)
-        return state.zone if state else None
+        if state is None:
+            return None
+        layout = rt.content.zone_layout
+        if layout is None:
+            return state.zone
+        if not state.floor_valid or state.floor is None:
+            return None
+        return resolve_zone(layout, [o.zone for o in rt.content.options], *state.floor)
 
     async def _set_answer(
         self, rt: RoundRuntime, player_id: str, zone: Optional[str], resolved: str
@@ -451,6 +461,7 @@ class GameEngine:
             "audio_url": f"/audio/{rt.content.audio}" if rt.content.audio else None,
             "form": rt.content.form,
             "form_labels": rt.content.form_labels,
+            "zone_layout": rt.content.zone_layout,
             "options": [{"zone": o.zone, "label": o.label} for o in rt.content.options],
             "duration_s": rt.content.duration_s,
             "grace_s": rt.content.grace_s,

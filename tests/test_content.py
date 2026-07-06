@@ -194,7 +194,12 @@ def test_form_with_labels_round_trips(tmp_path):
                     "y_bottom": "die Maschine führt",
                 },
                 "text": "Positioniere dich im Feld.",
-                "options": [{"zone": "a", "label": "X"}, {"zone": "b", "label": "Y"}],
+                "options": [
+                    {"zone": "tl", "label": "A"},
+                    {"zone": "tr", "label": "B"},
+                    {"zone": "bl", "label": "C"},
+                    {"zone": "br", "label": "D"},
+                ],
             }
         ],
     }
@@ -203,3 +208,87 @@ def test_form_with_labels_round_trips(tmp_path):
     assert round_.form == "cross"
     assert round_.form_labels["y_top"] == "ich führe"
     assert round_.text == "Positioniere dich im Feld."
+
+
+def test_zone_layout_derived_from_form(tmp_path):
+    data = {
+        "version": "1",
+        "rounds": [
+            {
+                "id": "r1",
+                "question": "?",
+                "form": "rings",
+                "form_labels": {"center": "ja", "edge": "nein"},
+                "options": [
+                    {"zone": "ring_center", "label": "ja"},
+                    {"zone": "ring_mid", "label": "teils"},
+                    {"zone": "ring_outer", "label": "nein"},
+                ],
+            }
+        ],
+    }
+    path = _write(tmp_path, data)
+    round_ = load_show(path, valid_zone_ids=set()).rounds[0]
+    assert round_.zone_layout == "circles"
+
+
+def test_explicit_zone_layout_overrides_form_default(tmp_path):
+    # A cross question judged on one axis only: two options, x_axis layout.
+    data = {
+        "version": "1",
+        "rounds": [
+            {
+                "id": "r1",
+                "question": "?",
+                "form": "cross",
+                "zone_layout": "x_axis",
+                "form_labels": {"x_left": "l", "x_right": "r", "y_top": "t", "y_bottom": "b"},
+                "options": [{"zone": "x_left", "label": "L"}, {"zone": "x_right", "label": "R"}],
+            }
+        ],
+    }
+    path = _write(tmp_path, data)
+    assert load_show(path, valid_zone_ids=set()).rounds[0].zone_layout == "x_axis"
+
+
+def test_quadrants_layout_requires_exactly_four_options(tmp_path):
+    data = {
+        "version": "1",
+        "rounds": [
+            {
+                "id": "r1",
+                "question": "?",
+                "form": "quadrants",
+                "options": [{"zone": "tl", "label": "A"}, {"zone": "tr", "label": "B"}],
+            }
+        ],
+    }
+    path = _write(tmp_path, data)
+    with pytest.raises(ContentError):
+        load_show(path, valid_zone_ids=set())
+
+
+def test_layout_round_zones_need_not_exist_in_tracking_map(tmp_path):
+    # Layout rounds use logical, per-question zone names resolved from floor
+    # positions — only "choice" rounds validate against TrackingBox zones.
+    data = {
+        "version": "1",
+        "rounds": [
+            {
+                "id": "r1",
+                "question": "?",
+                "form": "scale",
+                "form_labels": {"left": "l", "right": "r"},
+                "options": [{"zone": "scale_left", "label": "L"}, {"zone": "scale_right", "label": "R"}],
+            }
+        ],
+    }
+    path = _write(tmp_path, data)
+    show = load_show(path, valid_zone_ids={"ritual"})
+    assert show.rounds[0].zone_layout == "x_axis"
+
+
+def test_choice_round_has_no_layout_and_validates_zones(tmp_path):
+    path = _write(tmp_path, VALID_SHOW)
+    show = load_show(path, valid_zone_ids={"a", "b"})
+    assert show.rounds[0].zone_layout is None

@@ -16,8 +16,11 @@ loads empty ("no more rounds"). No real TrackingBox needed — run a fake:
 
 1. Fake TrackingBox: serve the zone ids from `dev/trackingbox.config.json` on
    `http://:8000/api/zones` and a WS on `:8001` that sends one snapshot with
-   people whose `zone` matches show zones (see tests/conftest.py for message
-   shapes; a standalone script pattern lives in past scratchpads).
+   people carrying `floor: [x, y]` + `floor_valid: true` (see
+   tests/conftest.py for message shapes). Question rounds resolve answers
+   from floor positions through the round's `zone_layout` (server/zones.py) —
+   the person's `zone` field only matters for the ritual corner and
+   "choice"-form rounds.
 2. Server (start it *after* the fake is listening, or restart it):
    `TRACKING_WS_URL=ws://localhost:8001/ws TRACKING_HTTP_URL=http://localhost:8000 GAME_DB_PATH=/tmp/verify.db .venv/bin/uvicorn server.app:app --port 8100`
 
