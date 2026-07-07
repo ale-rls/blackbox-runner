@@ -153,5 +153,5 @@ def validate_show(
 
 
 def load_show(path: str | Path, *, valid_zone_ids: Optional[set[str]] = None) -> ShowContent:
-    raw = yaml.safe_load(Path(path).read_text())
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     return validate_show(raw, valid_zone_ids=valid_zone_ids, source=f"show content at {path}")

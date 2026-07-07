@@ -37,9 +37,11 @@ its `/ws` and `/api/zones` endpoints and never modifies it for game features.
 See [`docs/architecture.md`](docs/architecture.md) for the full design plan
 (phases, data model, binding/rebind logic, testing strategy),
 [`docs/touchdesigner.md`](docs/touchdesigner.md) for the TD cue vocabulary,
-and **[`docs/runbook.md`](docs/runbook.md) if you're running the actual
+**[`docs/runbook.md`](docs/runbook.md) if you're running the actual
 show** — start order, health checks, what to do when something dies, and
-the content freeze process.
+the content freeze process — and
+[`docs/deployment.md`](docs/deployment.md) for running this as a container
+on Coolify while TrackingBox stays on the venue machine.
 
 ## Repo layout
 
@@ -78,6 +80,9 @@ docs/
   architecture.md      # the full design plan
   touchdesigner.md     # TD cue vocabulary + setup
   runbook.md           # ops runbook: start order, failure modes, replay
+  deployment.md        # Coolify + Tailscale deployment (TrackingBox on-prem)
+Dockerfile             # blackbox-runner image (not TrackingBox -- see deployment.md)
+docker-entrypoint.sh   # import_content.py, then serve; see deployment.md
 ```
 
 ## Development

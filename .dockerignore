@@ -1,0 +1,17 @@
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.github/
+.claude/
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.example
+node_modules/
+tests/

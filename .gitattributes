@@ -1,0 +1,6 @@
+# Shell scripts run inside Linux containers -- a CRLF shebang (`#!/bin/sh\r`)
+# breaks them there. Force LF regardless of core.autocrlf on the checkout
+# machine (this repo's default is true, which would otherwise convert these
+# to CRLF on a Windows clone).
+*.sh text eol=lf
+Dockerfile text eol=lf

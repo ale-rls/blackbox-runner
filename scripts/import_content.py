@@ -57,7 +57,7 @@ def main() -> int:
             return 2
 
     try:
-        raw = yaml.safe_load(Path(args.content).read_text())
+        raw = yaml.safe_load(Path(args.content).read_text(encoding="utf-8"))
         show = validate_show(
             raw, valid_zone_ids=valid_zone_ids, source=f"show content at {args.content}"
         )
