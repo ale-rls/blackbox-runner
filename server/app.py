@@ -355,6 +355,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 round_id,
                 fields,
                 valid_zone_ids=_edit_zone_ids(),
+                audio_dir=settings.audio_dir,
             )
         except ContentError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -374,6 +375,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 new_round,
                 after_id=after_id,
                 valid_zone_ids=_edit_zone_ids(),
+                audio_dir=settings.audio_dir,
             )
         except ContentError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -388,6 +390,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 db,
                 round_id,
                 valid_zone_ids=_edit_zone_ids(),
+                audio_dir=settings.audio_dir,
             )
         except ContentError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -437,6 +440,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             round_id,
             {"audio": filename},
             valid_zone_ids=_edit_zone_ids(),
+            audio_dir=settings.audio_dir,
         )
         reloaded, detail = _reload_engine(show)
         return {

@@ -8,9 +8,27 @@ import { gameFetch } from "$lib/config.js";
 
 const q = (s) => "'" + String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
 
+// Shared instance so file URLs can be built anywhere once connected.
+let pbInstance = null;
+
+/**
+ * Absolute URL for a PocketBase-stored file, via the SDK's file API.
+ * ``ref`` is the round payload's audio_file:
+ * {collection, record_id, filename}. Null until connectPocketBase() has
+ * resolved (callers fall back to the game-served /audio URL).
+ */
+export function pbFileUrl(ref) {
+  if (!ref || !pbInstance) return null;
+  return pbInstance.files.getURL(
+    { id: ref.record_id, collectionId: ref.collection, collectionName: ref.collection },
+    ref.filename,
+  );
+}
+
 export async function connectPocketBase({ playerId, onScore, onRoundRecord }) {
   const cfg = await gameFetch("/api/config").then((r) => r.json());
   const pb = new PocketBase(cfg.pocketbase_url);
+  pbInstance = pb;
 
   // Score badge is driven entirely from the public score_events collection:
   // initial sum via REST, then live increments via realtime.

@@ -3,10 +3,22 @@
 // players who reconnect already-bound never tap anything, so they get the
 // overlay instead.
 import { gameUrl } from "$lib/config.js";
+import { pbFileUrl } from "$lib/pb.js";
 
 // 44-byte silent WAV: a playable src for the unlock gesture.
 const SILENCE =
   "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+
+/**
+ * A round payload's narration audio source. Prefers the PocketBase-stored
+ * file (built with the SDK's pb.files.getURL via the payload's audio_file
+ * ref); falls back to the game-served /audio URL when the file isn't in
+ * PocketBase or the PB connection isn't up yet.
+ */
+export function roundAudioSrc(round) {
+  if (!round) return null;
+  return pbFileUrl(round.audio_file) || round.audio_url;
+}
 
 export const audio = $state({
   unlocked: false,

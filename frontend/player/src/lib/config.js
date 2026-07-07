@@ -9,9 +9,10 @@ export function gameFetch(path, opts) {
   return fetch(`${GAME_URL}${path}`, opts);
 }
 
-/** Absolute URL for a game-server path like /audio/x.mp3 (no-op when same-origin). */
+/** Absolute URL for a game-server path like /audio/x.mp3 (no-op when
+ * same-origin; already-absolute URLs pass through untouched). */
 export function gameUrl(path) {
-  if (!path) return path;
+  if (!path || /^https?:/.test(path)) return path;
   return `${GAME_URL}${path}`;
 }
 

@@ -33,9 +33,11 @@ persistence — so ``connect()`` raises instead of retrying forever.
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import logging
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 import httpx
@@ -118,7 +120,12 @@ class ContentRoundRow:
     ``options`` are held parsed (dict / list of dicts) — PocketBase json
     fields (de)serialize natively. ``zone_layout`` stays None unless the
     author set it explicitly, so a form change keeps re-deriving the layout
-    (content.py's FORM_LAYOUTS)."""
+    (content.py's FORM_LAYOUTS).
+
+    ``pb_id``/``audio_file`` are PocketBase bookkeeping filled in by
+    load_content, never authored: the record id and the *stored* filename
+    of the uploaded narration mp3 (PocketBase suffixes filenames), which
+    the player frontend turns into a file URL via pb.files.getURL()."""
 
     round_id: str
     ord: int
@@ -133,6 +140,8 @@ class ContentRoundRow:
     zone_layout: Optional[str]
     form_labels: dict
     options: list
+    pb_id: str = ""
+    audio_file: str = ""
 
 
 @dataclass(slots=True)
@@ -163,6 +172,9 @@ class PocketBaseClient:
         self._player_ids: dict[tuple[str, str], str] = {}
         self._answer_ids: dict[tuple[str, str], str] = {}
         self._content_meta_id: Optional[str] = None
+        # round_id -> (record id, stored audio filename) for the player
+        # frontend's pb.files.getURL(); fed by load/save_content.
+        self._content_files: dict[str, tuple[str, str]] = {}
 
     # ------------------------------------------------------------------ #
     # Connection / auth
@@ -548,6 +560,20 @@ class PocketBaseClient:
     # Show content (imported from the authoring YAML; the DB is the
     # runtime source of truth)
     # ------------------------------------------------------------------ #
+    def content_file_info(self, round_id: str) -> Optional[tuple[str, str]]:
+        """(record id, stored audio filename) for a round whose narration
+        mp3 lives as a PocketBase file — what the player frontend needs to
+        build a file URL with pb.files.getURL(). None if no uploaded file.
+        Synchronous on purpose: engine.round_payload() is sync."""
+        info = self._content_files.get(round_id)
+        return info if info and info[1] else None
+
+    def _remember_content_record(self, record: dict) -> None:
+        self._content_files[record["round_id"]] = (
+            record["id"],
+            record.get("audio_file") or "",
+        )
+
     async def load_content(self) -> tuple[str, list[ContentRoundRow]]:
         """Returns (version, rounds ordered by ord). No content imported yet
         is a valid empty state: ("", [])."""
@@ -563,54 +589,135 @@ class PocketBaseClient:
             version = meta_items[0].get("version") or ""
 
         records = await self._list_all("content_rounds", sort="ord")
-        rows = [
-            ContentRoundRow(
-                round_id=r["round_id"],
-                ord=r["ord"],
-                question=r.get("question") or "",
-                type=r["type"],
-                duration_s=r["duration_s"],
-                grace_s=r["grace_s"],
-                points=r["points"],
-                text=_none_if_empty(r.get("text") or ""),
-                audio=_none_if_empty(r.get("audio") or ""),
-                form=r["form"],
-                zone_layout=_none_if_empty(r.get("zone_layout") or ""),
-                form_labels=r.get("form_labels") or {},
-                options=r.get("options") or [],
+        self._content_files = {}
+        rows = []
+        for r in records:
+            self._remember_content_record(r)
+            rows.append(
+                ContentRoundRow(
+                    round_id=r["round_id"],
+                    ord=r["ord"],
+                    question=r.get("question") or "",
+                    type=r["type"],
+                    duration_s=r["duration_s"],
+                    grace_s=r["grace_s"],
+                    points=r["points"],
+                    text=_none_if_empty(r.get("text") or ""),
+                    audio=_none_if_empty(r.get("audio") or ""),
+                    form=r["form"],
+                    zone_layout=_none_if_empty(r.get("zone_layout") or ""),
+                    form_labels=r.get("form_labels") or {},
+                    options=r.get("options") or [],
+                    pb_id=r["id"],
+                    audio_file=r.get("audio_file") or "",
+                )
             )
-            for r in records
-        ]
         return version, rows
 
-    async def save_content(self, version: str, rows: list[ContentRoundRow]) -> None:
-        """Wipe-and-replace the whole show. PocketBase has no cross-record
-        transaction over REST, so unlike the SQLite layer this has a small
-        non-atomic window (documented MVP gap); the count check at the end
-        catches a partial replace immediately instead of silently."""
-        existing = await self._list_all("content_rounds")
-        for record in existing:
-            await self._delete("content_rounds", record["id"])
+    @staticmethod
+    def _content_body(r: ContentRoundRow) -> dict:
+        return {
+            "round_id": r.round_id,
+            "ord": r.ord,
+            "question": r.question,
+            "type": r.type,
+            "duration_s": r.duration_s,
+            "grace_s": r.grace_s,
+            "points": r.points,
+            "text": r.text or "",
+            "audio": r.audio or "",
+            "form": r.form,
+            "zone_layout": r.zone_layout or "",
+            "form_labels": r.form_labels,
+            "options": r.options,
+        }
 
+    async def _send_content_record(
+        self,
+        body: dict,
+        *,
+        record_id: Optional[str] = None,
+        audio_path: Optional[Path] = None,
+    ) -> dict:
+        """Create (record_id None) or update one content_rounds record,
+        attaching the narration mp3 as the ``audio_file`` file field when
+        given. File uploads use multipart, so non-file fields go as form
+        values with json fields serialized explicitly."""
+        method = "PATCH" if record_id else "POST"
+        path = f"/api/collections/content_rounds/records/{record_id or ''}".rstrip("/")
+        if audio_path is None:
+            return await self._request(method, path, json=body)
+        if self._token is None:
+            await self._authenticate()
+        data = {
+            k: _json.dumps(v) if isinstance(v, (dict, list)) else str(v)
+            for k, v in body.items()
+        }
+        resp = await self._http.request(
+            method,
+            path,
+            data=data,
+            files={"audio_file": (audio_path.name, audio_path.read_bytes(), "audio/mpeg")},
+            headers={"Authorization": self._token or ""},
+        )
+        if resp.status_code >= 400:
+            raise PocketBaseError(f"{method} {path} -> {resp.status_code}: {resp.text}")
+        return resp.json()
+
+    async def save_content(
+        self,
+        version: str,
+        rows: list[ContentRoundRow],
+        *,
+        audio_dir: Optional[str] = None,
+    ) -> None:
+        """Write the whole show, diffed by round_id against what's stored:
+        update in place, create what's new, delete what's gone. Narration
+        mp3s found in ``audio_dir`` are uploaded to each round's
+        ``audio_file`` file field (skipped when the stored file already
+        matches, so routine admin edits don't re-upload the whole show).
+
+        PocketBase has no cross-record transaction over REST, so a crash
+        mid-save can leave a partially updated show (documented MVP gap);
+        the count check at the end catches that loudly instead of silently.
+        """
+        existing = {r["round_id"]: r for r in await self._list_all("content_rounds")}
+        dir_path = Path(audio_dir) if audio_dir else None
+
+        def audio_upload(r: ContentRoundRow, record: Optional[dict]) -> Optional[Path]:
+            if not r.audio or dir_path is None:
+                return None
+            path = dir_path / r.audio
+            if not path.is_file():
+                return None
+            # Upload when new, when the logical filename changed, or when
+            # no file made it to PocketBase yet.
+            if record is None:
+                return path
+            if (record.get("audio") or "") != r.audio or not record.get("audio_file"):
+                return path
+            return None
+
+        seen: set[str] = set()
         for r in rows:
-            await self._create(
-                "content_rounds",
-                {
-                    "round_id": r.round_id,
-                    "ord": r.ord,
-                    "question": r.question,
-                    "type": r.type,
-                    "duration_s": r.duration_s,
-                    "grace_s": r.grace_s,
-                    "points": r.points,
-                    "text": r.text or "",
-                    "audio": r.audio or "",
-                    "form": r.form,
-                    "zone_layout": r.zone_layout or "",
-                    "form_labels": r.form_labels,
-                    "options": r.options,
-                },
+            seen.add(r.round_id)
+            body = self._content_body(r)
+            record = existing.get(r.round_id)
+            if record is None:
+                created = await self._send_content_record(body, audio_path=audio_upload(r, None))
+                self._remember_content_record(created)
+                continue
+            if r.audio is None and record.get("audio_file"):
+                body["audio_file"] = None  # audio removed: drop the stored file
+            updated = await self._send_content_record(
+                body, record_id=record["id"], audio_path=audio_upload(r, record)
             )
+            self._remember_content_record(updated)
+
+        for round_id, record in existing.items():
+            if round_id not in seen:
+                await self._delete("content_rounds", record["id"])
+                self._content_files.pop(round_id, None)
 
         if self._content_meta_id is None:
             meta = await self._request(
@@ -633,5 +740,5 @@ class PocketBaseClient:
         total = count.get("totalItems", -1)
         if total != len(rows):
             raise PocketBaseError(
-                f"content replace incomplete: expected {len(rows)} round(s), found {total}"
+                f"content save incomplete: expected {len(rows)} round(s), found {total}"
             )

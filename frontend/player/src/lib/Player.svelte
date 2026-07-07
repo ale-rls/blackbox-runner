@@ -1,7 +1,7 @@
 <script>
   import ClaimForm from "$lib/components/ClaimForm.svelte";
   import RoundPanel from "$lib/components/RoundPanel.svelte";
-  import { audio, attachElement, unlockAudio, playAudio } from "$lib/audio.svelte.js";
+  import { audio, attachElement, unlockAudio, playAudio, roundAudioSrc } from "$lib/audio.svelte.js";
   import { connectPocketBase } from "$lib/pb.js";
   import { gameFetch, gameWsUrl } from "$lib/config.js";
   import { onMount } from "svelte";
@@ -62,13 +62,13 @@
         round = msg.round;
         reveal = null;
         // Joining mid-step: catch up on the running narration/question audio.
-        if (msg.round && msg.round.state === "active") playAudio(msg.round.audio_url);
+        if (msg.round && msg.round.state === "active") playAudio(roundAudioSrc(msg.round));
         if (msg.scores && msg.scores[playerId] !== undefined) score = msg.scores[playerId];
       } else if (msg.type === "round_opened") {
         round = msg;
         reveal = null;
         yourAnswer = null;
-        playAudio(msg.audio_url);
+        playAudio(roundAudioSrc(msg));
       } else if (msg.type === "round_closing" || msg.type === "answers_locked") {
         round = msg;
       } else if (msg.type === "reveal") {

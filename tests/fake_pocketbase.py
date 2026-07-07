@@ -88,8 +88,39 @@ class FakePocketBase:
                 self.wfile.write(data)
 
             def _body(self) -> dict:
+                """JSON or multipart/form-data (file uploads). For file
+                parts, store the filename string — the shape real
+                PocketBase returns for a file field (modulo its random
+                suffix, which nothing in the tests depends on)."""
                 length = int(self.headers.get("Content-Length") or 0)
-                return json.loads(self.rfile.read(length) or b"{}")
+                raw = self.rfile.read(length)
+                ctype = self.headers.get("Content-Type") or ""
+                if not ctype.startswith("multipart/form-data"):
+                    return json.loads(raw or b"{}")
+
+                import email.parser
+                import email.policy
+
+                msg = email.parser.BytesParser(policy=email.policy.HTTP).parsebytes(
+                    b"Content-Type: " + ctype.encode() + b"\r\n\r\n" + raw
+                )
+                record: dict = {}
+                for part in msg.iter_parts():
+                    name = part.get_param("name", header="content-disposition")
+                    if name is None:
+                        continue
+                    if part.get_filename():
+                        record[name] = part.get_filename()
+                        continue
+                    text = (part.get_payload(decode=True) or b"").decode()
+                    try:
+                        # The client stringifies multipart form values
+                        # (numbers via str(), json fields via json.dumps);
+                        # real PocketBase coerces them back by field type.
+                        record[name] = json.loads(text)
+                    except (ValueError, TypeError):
+                        record[name] = text
+                return record
 
             def _authed(self) -> bool:
                 return bool(self.headers.get("Authorization"))

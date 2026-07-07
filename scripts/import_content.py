@@ -93,7 +93,7 @@ async def main() -> int:
     client = PocketBaseClient(args.pb_url, args.pb_email, args.pb_password)
     try:
         await client.connect()
-        await client.save_content(version, rows)
+        await client.save_content(version, rows, audio_dir=settings.audio_dir)
     finally:
         await client.close()
     print(f"Imported {len(rows)} round(s) (version {version!r}) from {args.content} into {args.pb_url}")

@@ -46,6 +46,7 @@ async def update_round(
     fields: dict,
     *,
     valid_zone_ids: Optional[set[str]] = None,
+    audio_dir: Optional[str] = None,
 ) -> ShowContent:
     """Merge ``fields`` into one round of the stored show and write it back.
 
@@ -75,7 +76,7 @@ async def update_round(
     show = validate_show(
         raw, valid_zone_ids=valid_zone_ids, source="edited show content (database)"
     )
-    await db.save_content(version, content_db.rows_from_raw(rounds))
+    await db.save_content(version, content_db.rows_from_raw(rounds), audio_dir=audio_dir)
     return show
 
 
@@ -85,6 +86,7 @@ async def create_round(
     *,
     after_id: Optional[str] = None,
     valid_zone_ids: Optional[set[str]] = None,
+    audio_dir: Optional[str] = None,
 ) -> ShowContent:
     """Insert a new round (a raw dict, same shape as one show.yaml entry)
     into the stored show and write it back.
@@ -117,7 +119,7 @@ async def create_round(
     show = validate_show(
         raw, valid_zone_ids=valid_zone_ids, source="edited show content (database)"
     )
-    await db.save_content(version, content_db.rows_from_raw(rounds))
+    await db.save_content(version, content_db.rows_from_raw(rounds), audio_dir=audio_dir)
     return show
 
 
@@ -126,6 +128,7 @@ async def delete_round(
     round_id: str,
     *,
     valid_zone_ids: Optional[set[str]] = None,
+    audio_dir: Optional[str] = None,
 ) -> ShowContent:
     """Remove one round from the stored show and write it back.
 
@@ -145,5 +148,5 @@ async def delete_round(
     show = validate_show(
         raw, valid_zone_ids=valid_zone_ids, source="edited show content (database)"
     )
-    await db.save_content(version, content_db.rows_from_raw(remaining))
+    await db.save_content(version, content_db.rows_from_raw(remaining), audio_dir=audio_dir)
     return show

@@ -128,6 +128,10 @@ def _collections(session_id: str, rounds_id: str) -> list[dict]:
             "type": "base",
             "fields": [
                 f("round_id", "text"),
+                # ord deliberately has no unique index: save_content diffs
+                # by round_id and PATCHes records in place, so a reorder
+                # swaps ords sequentially — transiently duplicated, finally
+                # consistent (the writer always emits 0..n-1).
                 f("ord", "number"),
                 f("question", "text"),
                 f("type", "text"),
@@ -140,10 +144,19 @@ def _collections(session_id: str, rounds_id: str) -> list[dict]:
                 f("zone_layout", "text"),
                 f("form_labels", "json"),
                 f("options", "json"),
+                # Narration mp3, uploaded by save_content; the player
+                # frontend builds its URL with pb.files.getURL(). File URLs
+                # are public-by-default in PocketBase even though the
+                # records themselves stay superuser-only.
+                {
+                    "name": "audio_file",
+                    "type": "file",
+                    "maxSelect": 1,
+                    "maxSize": 52428800,
+                },
             ],
             "indexes": [
                 "CREATE UNIQUE INDEX idx_content_rounds_rid ON content_rounds (round_id)",
-                "CREATE UNIQUE INDEX idx_content_rounds_ord ON content_rounds (ord)",
             ],
         },
     ]

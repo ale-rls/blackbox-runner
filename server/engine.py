@@ -457,6 +457,16 @@ class GameEngine:
         return []
 
     def round_payload(self, rt: RoundRuntime) -> dict:
+        # Narration mp3s live as PocketBase files (content_rounds.audio_file);
+        # the payload carries the pieces the player frontend feeds to
+        # pb.files.getURL(). audio_url stays as the game-served fallback for
+        # rounds whose file never made it into PocketBase.
+        file_info = self._db.content_file_info(rt.content.id)
+        audio_file = (
+            {"collection": "content_rounds", "record_id": file_info[0], "filename": file_info[1]}
+            if file_info
+            else None
+        )
         return {
             "round_id": rt.content.id,
             "index": rt.index,
@@ -468,6 +478,7 @@ class GameEngine:
             "question": rt.content.question,
             "text": rt.content.text,
             "audio_url": f"/audio/{rt.content.audio}" if rt.content.audio else None,
+            "audio_file": audio_file,
             "form": rt.content.form,
             "form_labels": rt.content.form_labels,
             "zone_layout": rt.content.zone_layout,
