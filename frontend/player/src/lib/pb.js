@@ -4,10 +4,12 @@
 // zero credentials (rules set by scripts/pocketbase_bootstrap.py).
 import PocketBase from "pocketbase";
 
+import { gameFetch } from "$lib/config.js";
+
 const q = (s) => "'" + String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
 
 export async function connectPocketBase({ playerId, onScore, onRoundRecord }) {
-  const cfg = await fetch("/api/config").then((r) => r.json());
+  const cfg = await gameFetch("/api/config").then((r) => r.json());
   const pb = new PocketBase(cfg.pocketbase_url);
 
   // Score badge is driven entirely from the public score_events collection:

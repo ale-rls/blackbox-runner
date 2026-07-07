@@ -1,10 +1,12 @@
 <script>
-  import ClaimForm from "./components/ClaimForm.svelte";
-  import RoundPanel from "./components/RoundPanel.svelte";
-  import { audio, attachElement, unlockAudio, playAudio } from "./lib/audio.svelte.js";
-  import { connectPocketBase } from "./lib/pb.js";
+  import ClaimForm from "$lib/components/ClaimForm.svelte";
+  import RoundPanel from "$lib/components/RoundPanel.svelte";
+  import { audio, attachElement, unlockAudio, playAudio } from "$lib/audio.svelte.js";
+  import { connectPocketBase } from "$lib/pb.js";
+  import { gameFetch, gameWsUrl } from "$lib/config.js";
+  import { onMount } from "svelte";
 
-  const playerId = decodeURIComponent(location.pathname.split("/").filter(Boolean).pop());
+  let { playerId } = $props();
 
   let player = $state(null);
   let round = $state(null);       // latest round payload from the game WS
@@ -31,7 +33,7 @@
 
   async function claim(gid) {
     unlockAudio(); // the tap that claims is also the tap that unlocks audio
-    const resp = await fetch(`/api/players/${encodeURIComponent(playerId)}/claim`, {
+    const resp = await gameFetch(`/api/players/${encodeURIComponent(playerId)}/claim`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ gid }),
@@ -45,7 +47,7 @@
 
   async function poll() {
     try {
-      const resp = await fetch(`/api/players/${encodeURIComponent(playerId)}`);
+      const resp = await gameFetch(`/api/players/${encodeURIComponent(playerId)}`);
       if (resp.ok) applyPlayer(await resp.json());
     } catch {
       // network hiccup: keep last known UI, try again next tick
@@ -53,8 +55,7 @@
   }
 
   function connectGameWs() {
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}/ws/player/${encodeURIComponent(playerId)}`);
+    const ws = new WebSocket(gameWsUrl(`/ws/player/${encodeURIComponent(playerId)}`));
     ws.onmessage = (evt) => {
       const msg = JSON.parse(evt.data);
       if (msg.type === "hello") {
@@ -82,26 +83,29 @@
     ws.onclose = () => setTimeout(() => { if (wasBound) connectGameWs(); }, 1500);
   }
 
-  // PocketBase realtime (issue #17): score badge fed by the public
-  // score_events collection; round state kept honest straight from the
-  // public rounds collection even if the game WS drops for a moment.
-  connectPocketBase({
-    playerId,
-    onScore: (total) => { score = total; },
-    onRoundRecord: (record, action) => {
-      if (round && record.question_id === round.round_id && !reveal) {
-        if (record.state === "closing" && round.state === "active") {
-          round = { ...round, state: "closing" };
+  onMount(() => {
+    // PocketBase realtime (issue #17): score badge fed by the public
+    // score_events collection; round state kept honest straight from the
+    // public rounds collection even if the game WS drops for a moment.
+    connectPocketBase({
+      playerId,
+      onScore: (total) => { score = total; },
+      onRoundRecord: (record) => {
+        if (round && record.question_id === round.round_id && !reveal) {
+          if (record.state === "closing" && round.state === "active") {
+            round = { ...round, state: "closing" };
+          }
         }
-      }
-    },
-  }).catch(() => {
-    // PocketBase realtime is an enhancement; the game WS remains the
-    // primary channel, so a subscribe failure must never break the page.
-  });
+      },
+    }).catch(() => {
+      // PocketBase realtime is an enhancement; the game WS remains the
+      // primary channel, so a subscribe failure must never break the page.
+    });
 
-  poll();
-  setInterval(poll, 3000);
+    poll();
+    const pollTimer = setInterval(poll, 3000);
+    return () => clearInterval(pollTimer);
+  });
 </script>
 
 {#if bound}

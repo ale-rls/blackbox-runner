@@ -1,6 +1,6 @@
 <script>
   import FormVisual from "./FormVisual.svelte";
-  import { playAudio } from "../lib/audio.svelte.js";
+  import { playAudio } from "$lib/audio.svelte.js";
 
   // `round` is the latest round payload from the game WS; `reveal` (when
   // set) is the reveal payload + the player's own answer.

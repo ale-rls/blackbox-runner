@@ -2,6 +2,7 @@
 // web/player/index.html: the claim tap doubles as the unlock gesture;
 // players who reconnect already-bound never tap anything, so they get the
 // overlay instead.
+import { gameUrl } from "$lib/config.js";
 
 // 44-byte silent WAV: a playable src for the unlock gesture.
 const SILENCE =
@@ -39,7 +40,7 @@ export function playAudio(url) {
     return;
   }
   audio.pendingUrl = null;
-  el.src = url;
+  el.src = gameUrl(url); // audio_url is game-server-relative (/audio/x.mp3)
   el.play().catch((err) => {
     // AbortError just means a newer step's audio superseded this play()
     // mid-load — the newer one is already playing, nothing to do.

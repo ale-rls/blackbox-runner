@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -36,7 +37,7 @@ log = logging.getLogger("blackbox_runner.app")
 
 _POSITION_LOG_INTERVAL_S = 5.0
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
-_PLAYER_DIST = Path(__file__).resolve().parent.parent / "frontend" / "player" / "dist"
+_PLAYER_BUILD = Path(__file__).resolve().parent.parent / "frontend" / "player" / "build"
 
 
 async def _log_positions_periodically(client: TrackingClient) -> None:
@@ -182,6 +183,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await db.close()
 
     app = FastAPI(title="Blackbox Runner", version="0.1.0", lifespan=lifespan)
+    # Permissive CORS so a standalone-deployed player frontend (SvelteKit
+    # static build with VITE_GAME_URL, docs in frontend/player) can call the
+    # API cross-origin. Consistent with the existing trust model: the admin
+    # API has no auth and the server lives on a venue LAN / private network.
+    app.add_middleware(
+        CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+    )
     app.state.settings = settings
     app.state.tracking = tracking
     app.state.db = db
@@ -538,20 +546,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         Public values only; never credentials."""
         return {"pocketbase_url": settings.pocketbase_url}
 
+    # The SvelteKit build (frontend/player, issue #17) is a pure SPA:
+    # every route serves the same fallback index.html and resolves
+    # client-side. web/player/index.html stays as the archived fallback
+    # when no build exists (e.g. a fresh checkout without Node).
+    _spa_index = _PLAYER_BUILD / "index.html"
+
     @app.get("/p/{player_id}")
     async def player_page(player_id: str) -> FileResponse:
-        # The Svelte build (frontend/player, issue #17) when present;
-        # web/player/index.html stays as the archived fallback.
-        dist_index = _PLAYER_DIST / "index.html"
-        if dist_index.is_file():
-            return FileResponse(dist_index)
+        if _spa_index.is_file():
+            return FileResponse(_spa_index)
         return FileResponse(_WEB_DIR / "player" / "index.html")
 
-    if (_PLAYER_DIST / "assets").is_dir():
+    if _spa_index.is_file():
+
+        @app.get("/")
+        async def player_entry() -> FileResponse:
+            """The one link to hand to every new audience member: the app
+            assigns them a sticky seat id and redirects to /p/{id}."""
+            return FileResponse(_spa_index)
+
+        # SvelteKit's hashed assets live under /_app.
         app.mount(
-            "/player-app",
-            StaticFiles(directory=_PLAYER_DIST),
-            name="player-app",
+            "/_app",
+            StaticFiles(directory=_PLAYER_BUILD / "_app"),
+            name="player-assets",
         )
 
     if (_WEB_DIR / "admin").is_dir():
