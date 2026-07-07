@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="de">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>Claim your dot</title>
+  <title>KI-Blackbox</title>
   <style>
     :root {
       color-scheme: dark;
@@ -17,6 +17,9 @@
       --green: #4ade80;
       --red: #f87171;
       --amber: #fbbf24;
+      --rosa: #f472b6;
+      --gruen: #4ade80;
+      --blau: #60a5fa;
       --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     * { box-sizing: border-box; }
@@ -90,7 +93,21 @@
     /* Round panel */
     .round-panel { width: 100%; }
     .phase-note { color: var(--muted); font-size: 1.05rem; }
-    .question { font-size: 1.55rem; font-weight: 800; line-height: 1.25; }
+    .question { font-size: 1.45rem; font-weight: 800; line-height: 1.25; }
+    .step-text {
+      margin-top: 1rem; text-align: left; white-space: pre-line;
+      font-size: 1.02rem; line-height: 1.55; color: var(--text);
+    }
+    .step-text.narration { font-size: 1.12rem; }
+    .listen-note { color: var(--muted); font-size: 0.9rem; margin-top: 1rem; }
+    .replay-row { margin-top: 1rem; }
+    button.replay {
+      font: inherit; font-size: 0.95rem; font-weight: 600;
+      padding: 0.55em 1.1em; border-radius: 999px; cursor: pointer;
+      background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    }
+    button.replay:active { transform: scale(0.97); }
+
     .options { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 1.1rem; }
     .option {
       display: flex; justify-content: space-between; align-items: center; gap: 0.8rem;
@@ -104,6 +121,63 @@
     }
     .option.winner .count { color: var(--green); }
 
+    /* Form visuals: mirror the floor markings */
+    .form-visual { margin-top: 1.3rem; }
+    .scale-line {
+      height: 6px; border-radius: 3px; background: var(--rosa);
+      box-shadow: 0 0 12px rgba(244, 114, 182, 0.4);
+    }
+    .scale-labels {
+      display: flex; justify-content: space-between; gap: 0.8rem; margin-top: 0.6rem;
+      font-size: 0.92rem; font-weight: 600;
+    }
+    .scale-labels span { max-width: 45%; }
+    .scale-labels span:first-child { text-align: left; }
+    .scale-labels span:last-child { text-align: right; }
+    .scale-labels.three span { max-width: 32%; }
+    .scale-labels.three span:nth-child(2) { text-align: center; color: var(--muted); }
+
+    .cross { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+    .cross-label { font-size: 0.92rem; font-weight: 600; }
+    .cross-label.y { color: var(--gruen); }
+    .cross-label.x { color: var(--rosa); }
+    .cross-mid { display: flex; align-items: center; gap: 0.6rem; width: 100%; justify-content: center; }
+    .cross-mid .cross-label { flex: 1; }
+    .cross-mid .cross-label:first-child { text-align: right; }
+    .cross-mid .cross-label:last-child { text-align: left; }
+    .cross-box {
+      position: relative; width: 9.5rem; height: 9.5rem; flex-shrink: 0;
+      border: 1px solid var(--border); border-radius: 0.6rem; background: var(--panel-2);
+    }
+    .cross-box .axis-v {
+      position: absolute; left: 50%; top: 6%; bottom: 6%; width: 4px; margin-left: -2px;
+      background: var(--gruen); border-radius: 2px; box-shadow: 0 0 10px rgba(74, 222, 128, 0.4);
+    }
+    .cross-box .axis-h {
+      position: absolute; top: 50%; left: 6%; right: 6%; height: 4px; margin-top: -2px;
+      background: var(--rosa); border-radius: 2px; box-shadow: 0 0 10px rgba(244, 114, 182, 0.4);
+    }
+
+    .quadrants {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+      padding: 6px; border-radius: 0.8rem;
+      background: linear-gradient(to right, var(--rosa), var(--gruen));
+    }
+    .quadrant {
+      background: var(--panel-2); border-radius: 0.5rem; padding: 1.1em 0.7em;
+      font-size: 0.98rem; font-weight: 700; min-height: 4.4em;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    .rings { display: flex; flex-direction: column; align-items: center; gap: 0.7rem; }
+    .ring { border: 3px solid var(--blau); border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+    .ring.outer { width: 13rem; height: 13rem; opacity: 0.45; }
+    .ring.middle { width: 9.2rem; height: 9.2rem; opacity: 0.7; }
+    .ring.inner { width: 5.4rem; height: 5.4rem; opacity: 1; box-shadow: 0 0 14px rgba(96, 165, 250, 0.45); }
+    .ring-center-label { font-size: 0.8rem; font-weight: 700; color: var(--blau); padding: 0.3em; line-height: 1.2; }
+    .ring-edge-label { font-size: 0.92rem; font-weight: 600; color: var(--muted); }
+    .ring-edge-label b { color: var(--text); }
+
     .countdown-wrap { margin-top: 1.1rem; }
     .countdown { font-size: 0.95rem; color: var(--muted); margin-bottom: 0.45rem; }
     .countdown b { color: var(--text); font-family: var(--mono); font-size: 1.05rem; }
@@ -116,25 +190,43 @@
     .result.win { color: var(--green); }
     .result.lose { color: var(--red); }
     .result.absent { color: var(--muted); font-weight: 600; }
+
+    /* Audio unlock overlay */
+    #audio-unlock {
+      position: fixed; inset: 0; z-index: 10;
+      background: rgba(10, 10, 16, 0.88); backdrop-filter: blur(4px);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 0.8rem; cursor: pointer; text-align: center; padding: 2rem;
+    }
+    #audio-unlock .icon { font-size: 3rem; }
+    #audio-unlock .label { font-size: 1.15rem; font-weight: 700; }
+    #audio-unlock .sub { color: var(--muted); font-size: 0.95rem; }
   </style>
 </head>
 <body>
   <div class="topbar" id="topbar" hidden>
     <span class="gid-chip" id="gid-display"></span>
-    <span class="conn bound">Connected</span>
-    <span class="score-chip" id="score-badge" hidden>0 pts</span>
+    <span class="conn bound">Verbunden</span>
+    <span class="score-chip" id="score-badge" hidden>0 Punkte</span>
+  </div>
+
+  <div id="audio-unlock" hidden>
+    <div class="icon">🔊</div>
+    <div class="label">Tippen, um den Ton zu starten</div>
+    <div class="sub">Setz deine Kopfhörer auf</div>
   </div>
 
   <main>
-    <div class="banner ritual" id="ritual-banner" hidden>Walk to the glowing corner ✦</div>
-    <div class="banner lost" id="lost-banner" hidden>Lost you — type your new number, or wait for an usher</div>
+    <div class="banner ritual" id="ritual-banner" hidden>Geh zur leuchtenden Ecke ✦</div>
+    <div class="banner lost" id="lost-banner" hidden>Wir haben dich verloren — gib deine neue Nummer ein oder warte auf das Personal</div>
 
     <div id="claim-form">
-      <h1>Enter the number on your dot</h1>
+      <h1>Willkommen in der KI-Blackbox</h1>
       <div class="player-id" id="player-id"></div>
+      <p class="phase-note" style="margin:0">Gib die Nummer auf deinem Punkt ein</p>
       <input id="gid" inputmode="numeric" pattern="[0-9]*" maxlength="5" autofocus autocomplete="off" />
       <div class="error" id="error"></div>
-      <button class="claim" id="submit">Claim</button>
+      <button class="claim" id="submit">Verbinden</button>
     </div>
 
     <div id="status" hidden>
@@ -142,13 +234,15 @@
     </div>
   </main>
 
+  <audio id="narration" preload="auto"></audio>
+
   <script>
     const $ = (id) => document.getElementById(id);
     const esc = (s) =>
       String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
     const playerId = decodeURIComponent(location.pathname.split("/").filter(Boolean).pop());
-    $("player-id").textContent = `Player ${playerId}`;
+    $("player-id").textContent = `Gerät ${playerId}`;
 
     const form = $("claim-form");
     const statusEl = $("status");
@@ -156,12 +250,59 @@
     const gidInput = $("gid");
     const submitBtn = $("submit");
 
+    // ---- narration audio ----
+    // Browsers only allow playback after a user gesture. The claim tap doubles
+    // as that gesture; players who reconnect already-bound never tap anything,
+    // so they get the unlock overlay instead.
+    const narration = $("narration");
+    const unlockOverlay = $("audio-unlock");
+    // 44-byte silent WAV: a playable src for the unlock gesture.
+    const SILENCE = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+    let audioUnlocked = false;
+    let pendingAudioUrl = null;
+
+    function unlockAudio() {
+      if (audioUnlocked) return;
+      audioUnlocked = true;
+      unlockOverlay.hidden = true;
+      if (pendingAudioUrl) {
+        playAudio(pendingAudioUrl);
+      } else {
+        narration.src = SILENCE;
+        narration.play().catch(() => {});
+      }
+    }
+
+    function playAudio(url) {
+      if (!url) return;
+      if (!audioUnlocked) {
+        pendingAudioUrl = url;
+        unlockOverlay.hidden = false;
+        return;
+      }
+      pendingAudioUrl = null;
+      narration.src = url;
+      narration.play().catch((err) => {
+        // AbortError just means a newer step's audio superseded this play()
+        // mid-load — the newer one is already playing, nothing to do.
+        if (err && err.name === "AbortError") return;
+        // Playback was blocked after all (e.g. iOS revoked the unlock):
+        // fall back to an explicit tap.
+        audioUnlocked = false;
+        pendingAudioUrl = url;
+        unlockOverlay.hidden = false;
+      });
+    }
+
+    unlockOverlay.addEventListener("click", unlockAudio);
+
     async function claim() {
       const gid = parseInt(gidInput.value, 10);
       if (!Number.isFinite(gid)) {
-        errorEl.textContent = "Enter the number you were shown.";
+        errorEl.textContent = "Gib die Nummer ein, die dir gezeigt wurde.";
         return;
       }
+      unlockAudio(); // the tap that claims is also the tap that unlocks audio
       submitBtn.disabled = true;
       errorEl.textContent = "";
       try {
@@ -172,7 +313,7 @@
         });
         if (!resp.ok) {
           const body = await resp.json().catch(() => ({}));
-          throw new Error(body.detail || `claim failed (${resp.status})`);
+          throw new Error(body.detail || `Verbindung fehlgeschlagen (${resp.status})`);
         }
         render(await resp.json());
       } catch (err) {
@@ -226,7 +367,10 @@
     let countdownTimer = null;
 
     function setScore(points) {
-      scoreBadge.textContent = `${points} pts`;
+      // The narrated show runs with points: 0 — only surface a score when
+      // there is actually one to show.
+      if (!points) { scoreBadge.hidden = true; return; }
+      scoreBadge.textContent = `${points} Punkte`;
       scoreBadge.hidden = false;
     }
 
@@ -240,19 +384,94 @@
         .join("");
     }
 
+    // ---- form visuals: on-screen mirrors of the floor markings ----
+    function scaleHtml(labels) {
+      const spans = labels.filter((l) => l !== undefined).map((l) => `<span>${esc(l || "")}</span>`).join("");
+      return `
+        <div class="form-visual">
+          <div class="scale-line"></div>
+          <div class="scale-labels${labels.length === 3 ? " three" : ""}">${spans}</div>
+        </div>`;
+    }
+
+    function crossHtml(fl) {
+      return `
+        <div class="form-visual cross">
+          <div class="cross-label y">${esc(fl.y_top || "")}</div>
+          <div class="cross-mid">
+            <div class="cross-label x">${esc(fl.x_left || "")}</div>
+            <div class="cross-box"><div class="axis-v"></div><div class="axis-h"></div></div>
+            <div class="cross-label x">${esc(fl.x_right || "")}</div>
+          </div>
+          <div class="cross-label y">${esc(fl.y_bottom || "")}</div>
+        </div>`;
+    }
+
+    function quadrantsHtml(options) {
+      const cells = options.map((o) => `<div class="quadrant">${esc(o.label)}</div>`).join("");
+      return `<div class="form-visual quadrants">${cells}</div>`;
+    }
+
+    function ringsHtml(fl) {
+      return `
+        <div class="form-visual rings">
+          <div class="ring outer"><div class="ring middle"><div class="ring inner">
+            <span class="ring-center-label">${esc(fl.center || "")}</span>
+          </div></div></div>
+          <div class="ring-edge-label">Rand: <b>${esc(fl.edge || "")}</b></div>
+        </div>`;
+    }
+
+    function formHtml(round) {
+      const fl = round.form_labels || {};
+      switch (round.form) {
+        case "scale": return scaleHtml([fl.left, fl.right]);
+        case "scale3": return scaleHtml([fl.left, fl.middle, fl.right]);
+        case "cross": return crossHtml(fl);
+        case "quadrants": return quadrantsHtml(round.options || []);
+        case "rings": return ringsHtml(fl);
+        default: return `<div class="options">${optionsHtml(round)}</div>`;
+      }
+    }
+
+    function replayHtml(round) {
+      if (!round.audio_url) return "";
+      return `<div class="replay-row"><button class="replay" id="replay-btn">↺ Nochmal hören</button></div>`;
+    }
+
+    function wireReplay(round) {
+      const btn = $("replay-btn");
+      if (btn) btn.addEventListener("click", () => playAudio(round.audio_url));
+    }
+
     function renderRound(round) {
       clearInterval(countdownTimer);
       if (!round) {
-        roundPanel.innerHTML = `<div class="phase-note">Waiting for the next round…</div>`;
+        roundPanel.innerHTML = `<div class="phase-note">Warte auf den nächsten Schritt…</div>`;
         return;
       }
+
+      if (round.round_type === "narration") {
+        roundPanel.innerHTML = `
+          <div class="question">${esc(round.question)}</div>
+          <div class="step-text narration">${esc(round.text || "")}</div>
+          ${replayHtml(round)}
+          <div class="listen-note">Hör zu — es geht gleich weiter.</div>
+        `;
+        wireReplay(round);
+        return;
+      }
+
       roundPanel.innerHTML = `
         <div class="question">${esc(round.question)}</div>
-        <div class="options">${optionsHtml(round)}</div>
+        ${round.text ? `<div class="step-text">${esc(round.text)}</div>` : ""}
+        ${formHtml(round)}
+        ${replayHtml(round)}
         <div class="countdown-wrap" id="countdown-wrap"></div>
       `;
+      wireReplay(round);
       const wrap = $("countdown-wrap");
-      if (round.state === "active" && round.opened_at) {
+      if (round.state === "active" && round.opened_at && round.duration_s > 0) {
         wrap.innerHTML = `
           <div class="countdown" id="countdown-text"></div>
           <div class="timebar"><div class="timebar-fill" id="timebar-fill"></div></div>
@@ -264,7 +483,7 @@
           if (!textEl || !fillEl) return;
           const msLeft = Math.max(0, endsAt - Date.now());
           const secs = Math.ceil(msLeft / 1000);
-          textEl.innerHTML = secs > 0 ? `<b>${secs}s</b> — move to your answer` : "Time's up!";
+          textEl.innerHTML = secs > 0 ? `<b>${secs}s</b> — finde deine Position` : "Die Zeit ist um!";
           const pct = Math.min(100, (msLeft / (round.duration_s * 1000)) * 100);
           fillEl.style.width = `${pct}%`;
           fillEl.className = `timebar-fill${msLeft < 5000 ? " low" : ""}`;
@@ -272,21 +491,28 @@
         tick();
         countdownTimer = setInterval(tick, 250);
       } else if (round.state === "closing") {
-        wrap.innerHTML = `<div class="locking">Locking in answers…</div>`;
+        wrap.innerHTML = `<div class="locking">Positionen werden gespeichert…</div>`;
       }
     }
 
     function renderReveal(round, yourAnswer) {
       clearInterval(countdownTimer);
+      if (round.round_type === "narration") return; // narration steps just end
       const winners = new Set(round.winning_zones || []);
-      const won = yourAnswer && yourAnswer.zone && winners.has(yourAnswer.zone);
-      const absent = !yourAnswer || yourAnswer.resolved === "absent";
-      const resultText = absent ? "You didn't answer this one" : won ? "You scored!" : "Not this time";
-      const resultCls = absent ? "absent" : won ? "win" : "lose";
+      const absent = !yourAnswer || !yourAnswer.zone;
+      let resultText, resultCls;
+      if (absent) {
+        resultText = "Keine Position erfasst";
+        resultCls = "absent";
+      } else {
+        const opt = (round.options || []).find((o) => o.zone === yourAnswer.zone);
+        resultText = `Erfasst: ${opt ? opt.label : yourAnswer.zone}`;
+        resultCls = winners.has(yourAnswer.zone) ? "win" : "";
+      }
       roundPanel.innerHTML = `
         <div class="question">${esc(round.question)}</div>
         <div class="options">${optionsHtml(round, { winners, tally: round.tally || {} })}</div>
-        <div class="result ${resultCls}">${resultText}</div>
+        <div class="result ${resultCls}">${esc(resultText)}</div>
       `;
     }
 
@@ -297,8 +523,13 @@
         const msg = JSON.parse(evt.data);
         if (msg.type === "hello") {
           renderRound(msg.round);
+          // Joining mid-step: catch up on the running narration/question audio.
+          if (msg.round && msg.round.state === "active") playAudio(msg.round.audio_url);
           if (msg.scores && msg.scores[playerId] !== undefined) setScore(msg.scores[playerId]);
-        } else if (msg.type === "round_opened" || msg.type === "round_closing" || msg.type === "answers_locked") {
+        } else if (msg.type === "round_opened") {
+          renderRound(msg);
+          playAudio(msg.audio_url);
+        } else if (msg.type === "round_closing" || msg.type === "answers_locked") {
           renderRound(msg);
         } else if (msg.type === "reveal") {
           renderReveal(msg, msg.your_answer);

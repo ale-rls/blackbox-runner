@@ -64,17 +64,19 @@
         "round round"
         "board map"
         "board scores"
-        "cues  scores";
+        "cues  scores"
+        "editor editor";
       align-items: start;
     }
     @media (max-width: 60rem) {
-      main { grid-template-columns: 1fr; grid-template-areas: "round" "map" "board" "scores" "cues"; }
+      main { grid-template-columns: 1fr; grid-template-areas: "round" "map" "board" "scores" "cues" "editor"; }
     }
     #card-round { grid-area: round; }
     #card-board { grid-area: board; }
     #card-map { grid-area: map; }
     #card-scores { grid-area: scores; }
     #card-cues { grid-area: cues; }
+    #card-editor { grid-area: editor; }
 
     .card {
       background: var(--panel); border: 1px solid var(--border);
@@ -102,11 +104,12 @@
     button.ghost { color: var(--muted); }
     button.small { font-size: 0.8rem; padding: 0.3em 0.7em; }
     button.ritual { border-color: rgba(251, 191, 36, 0.4); color: var(--amber); }
-    input[type="text"], input:not([type]) , input[type="number"] {
+    input[type="text"], input:not([type]) , input[type="number"], textarea {
       font: inherit; background: var(--panel-2); color: var(--text);
       border: 1px solid var(--border); border-radius: 0.45rem; padding: 0.4em 0.6em;
     }
-    input:focus { outline: none; border-color: var(--accent); }
+    input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+    textarea { resize: vertical; line-height: 1.5; }
     .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
     /* Round control */
@@ -152,7 +155,7 @@
 
     /* Floor map */
     .floor-map { width: 100%; aspect-ratio: 1; background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 0.6rem; display: block; }
-    .floor-map .zone { fill: rgba(109, 116, 246, 0.05); stroke: rgba(109, 116, 246, 0.35); stroke-width: 0.3; }
+    .floor-map .zone { fill: none; stroke: rgba(109, 116, 246, 0.35); stroke-width: 0.3; }
     .floor-map .zone-label { fill: var(--muted); font-size: 3px; font-family: var(--mono); letter-spacing: 0.05em; }
     .floor-map .p-label { fill: var(--text); font-size: 3.2px; font-family: var(--mono); paint-order: stroke; stroke: rgba(10, 10, 16, 0.8); stroke-width: 0.8; }
     .floor-map .gid-label { fill: var(--muted); font-size: 2.6px; font-family: var(--mono); }
@@ -188,6 +191,40 @@
     .cue-log .t { color: var(--muted); flex-shrink: 0; }
     .cue-log .type { color: var(--accent); flex-shrink: 0; }
     .cue-log .body { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Show editor */
+    .tag {
+      display: inline-block; padding: 0.15em 0.6em; border-radius: 999px;
+      font-size: 0.7rem; font-weight: 600; color: var(--muted);
+      border: 1px solid var(--border); background: var(--panel-2);
+    }
+    .tag.narration { color: var(--accent); border-color: rgba(109, 116, 246, 0.4); }
+    td.editor-q { max-width: 26rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .audio-ok { color: var(--green); }
+    .audio-ok a { color: inherit; }
+    .audio-missing { color: var(--red); }
+    .audio-none { color: var(--muted); }
+    tr.editor-open td { border-bottom: none; }
+    .round-editor {
+      display: grid; gap: 0.8rem; margin: 0.2rem 0 0.8rem;
+      background: var(--panel-2); border: 1px solid var(--border-soft);
+      border-radius: 0.6rem; padding: 0.9rem 1rem;
+    }
+    .round-editor .field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .round-editor .field > span {
+      font-size: 0.68rem; font-weight: 600; letter-spacing: 0.11em;
+      text-transform: uppercase; color: var(--muted);
+    }
+    .round-editor .field-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.7rem;
+    }
+    .round-editor .option-row { display: flex; align-items: center; gap: 0.6rem; }
+    .round-editor .option-row input { flex: 1; }
+    .round-editor .zone-chip { font-family: var(--mono); font-size: 0.74rem; color: var(--muted); min-width: 7em; }
+    .round-editor .editor-actions { display: flex; gap: 0.5rem; align-items: center; }
+    .tts-note { font-size: 0.78rem; color: var(--muted); }
+    .tts-note.off { color: var(--amber); }
+    input#tts-voice { width: 15em; font-family: var(--mono); font-size: 0.8rem; }
 
     /* Toast */
     #toast {
@@ -269,6 +306,26 @@
         <button class="primary" id="btn-cue">Fire</button>
       </div>
       <div class="cue-log" id="cue-log"></div>
+    </section>
+
+    <section class="card" id="card-editor">
+      <div class="card-head">
+        <h2>Show editor</h2>
+        <div class="aux">
+          <span class="tts-note" id="tts-note"></span>
+          <input id="tts-voice" placeholder="voice id override" title="ElevenLabs voice id — leave empty for the configured ELEVENLABS_VOICE_ID" />
+          <button class="small" id="btn-tts-missing">Generate missing audio</button>
+          <button class="small" id="btn-add-round">+ Add round</button>
+        </div>
+      </div>
+      <div id="create-round-panel" style="display:none"></div>
+      <table>
+        <thead>
+          <tr><th>#</th><th>Step</th><th>Type</th><th>Question</th><th>Audio</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="editor-rows"></tbody>
+      </table>
+      <div class="empty" id="editor-empty" style="display:none">Show content not loaded.</div>
     </section>
   </main>
 
@@ -428,31 +485,53 @@
     }
 
     // ---------------------------------------------------------------- //
-    // Floor map: zone outlines (fetched once) + live dots.
+    // Floor map: the current round's zone layout + live dots. Each question
+    // divides the whole floor into its own shape (circles, x/y bands,
+    // quadrants) — with no round in flight the floor is unmarked.
     // Bound players use the live audience position for their GID when
     // available; lost/orphaned players show at their last-seen spot.
     // ---------------------------------------------------------------- //
     let audience = [];
     let liveGids = new Set();
+    let drawnLayoutKey = null;
 
-    async function loadZones() {
-      try {
-        const resp = await fetch("/api/tracking/zones");
-        if (!resp.ok) throw new Error();
-        const map = await resp.json();
-        $("zone-layer").innerHTML = (map.zones || [])
-          .map((z) => {
-            const pts = (z.points || []).map(([x, y]) => `${(x * 100).toFixed(1)},${(y * 100).toFixed(1)}`).join(" ");
-            if (!pts) return "";
-            const cx = z.points.reduce((s, [x]) => s + x, 0) / z.points.length;
-            const cy = z.points.reduce((s, [, y]) => s + y, 0) / z.points.length;
-            return `<polygon class="zone" points="${pts}"></polygon>
-              <text class="zone-label" x="${(cx * 100).toFixed(1)}" y="${(cy * 100).toFixed(1)}" text-anchor="middle">${esc(z.id)}</text>`;
-          })
-          .join("");
-      } catch (err) {
-        setTimeout(loadZones, 5000); // TrackingBox may not be up yet
+    function drawZoneLayer() {
+      const r = currentRound;
+      const active = r && r.zone_layout && r.state !== "done";
+      const key = active ? `${r.round_id}:${r.zone_layout}:${r.state}` : null;
+      if (key === drawnLayoutKey) return;
+      drawnLayoutKey = key;
+      if (!active) { $("zone-layer").innerHTML = ""; return; }
+
+      const opts = r.options || [];
+      const n = opts.length;
+      const parts = [];
+      const line = (x1, y1, x2, y2) =>
+        parts.push(`<line class="zone" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`);
+      const label = (x, y, text) =>
+        parts.push(`<text class="zone-label" x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="middle">${esc(text)}</text>`);
+
+      switch (r.zone_layout) {
+        case "x_axis": // options left -> right in equal bands
+          for (let i = 1; i < n; i++) line((i / n) * 100, 0, (i / n) * 100, 100);
+          opts.forEach((o, i) => label(((i + 0.5) / n) * 100, 50, o.zone));
+          break;
+        case "y_axis": // options top -> bottom in equal bands
+          for (let i = 1; i < n; i++) line(0, (i / n) * 100, 100, (i / n) * 100);
+          opts.forEach((o, i) => label(50, ((i + 0.5) / n) * 100, o.zone));
+          break;
+        case "quadrants": // options tl, tr, bl, br
+          line(50, 0, 50, 100);
+          line(0, 50, 100, 50);
+          opts.forEach((o, i) => label(i % 2 ? 75 : 25, i < 2 ? 25 : 75, o.zone));
+          break;
+        case "circles": // options center -> edge in equal-width rings
+          for (let i = 1; i <= n; i++)
+            parts.push(`<circle class="zone" cx="50" cy="50" r="${(i / n) * 50}"></circle>`);
+          opts.forEach((o, i) => label(50, 50 + ((i + 0.5) / n) * 50, o.zone));
+          break;
       }
+      $("zone-layer").innerHTML = parts.join("");
     }
 
     async function refreshAudience() {
@@ -554,6 +633,7 @@
       } catch (err) {
         toast(err.message, true);
       }
+      loadContent();
     });
 
     async function refreshRound() {
@@ -561,6 +641,7 @@
         const resp = await fetch("/api/rounds/current");
         currentRound = resp.ok ? await resp.json() : null;
         renderRoundCard();
+        drawZoneLayer();
       } catch (err) { /* try again next tick */ }
     }
 
@@ -672,6 +753,594 @@
       }
     });
 
+    // ---------------------------------------------------------------- //
+    // Show editor — edits go to the server's content database via the admin API and
+    // hot-reload into the engine when no round is in flight. The table is
+    // only rebuilt on explicit loads (never on a timer), so an open editor
+    // form is never wiped mid-typing.
+    // ---------------------------------------------------------------- //
+    let showContent = null; // last GET /api/admin/content payload
+    let openEditorId = null;
+
+    async function loadContent() {
+      try {
+        const resp = await fetch("/api/admin/content");
+        if (!resp.ok) {
+          const detail = (await resp.json().catch(() => ({}))).detail;
+          throw new Error(detail || `content load failed (${resp.status})`);
+        }
+        showContent = await resp.json();
+        renderEditor();
+      } catch (err) {
+        showContent = null;
+        $("editor-rows").innerHTML = "";
+        const empty = $("editor-empty");
+        empty.style.display = "block";
+        empty.textContent = err.message;
+      }
+    }
+
+    function ttsReady() {
+      return !!(showContent && showContent.tts && showContent.tts.configured);
+    }
+
+    function renderEditor() {
+      openEditorId = null;
+      const note = $("tts-note");
+      if (ttsReady()) {
+        note.className = "tts-note";
+        note.textContent = `ElevenLabs ready (${showContent.tts.model_id}${showContent.tts.voice_id ? "" : ", no default voice"})`;
+      } else {
+        note.className = "tts-note off";
+        note.textContent = "ElevenLabs off — set ELEVENLABS_API_KEY";
+      }
+      $("btn-tts-missing").disabled = !ttsReady();
+
+      const rows = $("editor-rows");
+      rows.innerHTML = "";
+      showContent.rounds.forEach((r, i) => rows.append(createEditorRow(r, i)));
+      $("editor-empty").style.display = showContent.rounds.length ? "none" : "block";
+    }
+
+    function audioCellHtml(r) {
+      if (!r.audio) return `<span class="audio-none">—</span>`;
+      if (!r.audio_exists) return `<span class="audio-missing">${esc(r.audio)} (missing)</span>`;
+      return `<span class="audio-ok"><a href="${esc(r.audio_url)}" target="_blank" title="Play">▶</a> ${esc(r.audio)}</span>`;
+    }
+
+    function createEditorRow(r, i) {
+      const frag = document.createDocumentFragment();
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="mono">${i + 1}</td>
+        <td class="mono">${esc(r.id)}</td>
+        <td><span class="tag ${r.type === "narration" ? "narration" : ""}">${esc(r.type === "narration" ? "narration" : r.form)}</span></td>
+        <td class="editor-q" title="${esc(r.question)}">${esc(r.question)}</td>
+        <td class="mono">${audioCellHtml(r)}</td>
+        <td></td>`;
+      const actions = document.createElement("div");
+      actions.className = "row-actions";
+      const editBtn = document.createElement("button");
+      editBtn.className = "small";
+      editBtn.textContent = "Edit";
+      editBtn.addEventListener("click", () => toggleEditor(r, tr));
+      const ttsBtn = document.createElement("button");
+      ttsBtn.className = "small";
+      ttsBtn.textContent = r.audio_exists ? "Re-generate voice" : "Generate voice";
+      ttsBtn.disabled = !ttsReady();
+      if (!ttsReady()) ttsBtn.title = "Set ELEVENLABS_API_KEY to enable";
+      ttsBtn.addEventListener("click", () => generateAudio(r.id, ttsBtn));
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "small ghost";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.addEventListener("click", () => deleteRound(r.id, deleteBtn));
+      actions.append(editBtn, ttsBtn, deleteBtn);
+      tr.lastElementChild.appendChild(actions);
+      frag.append(tr);
+      return frag;
+    }
+
+    function toggleEditor(r, tr) {
+      const existing = tr.nextElementSibling;
+      if (existing && existing.classList.contains("editor-row")) {
+        existing.remove();
+        tr.classList.remove("editor-open");
+        openEditorId = null;
+        return;
+      }
+      document.querySelectorAll("#editor-rows .editor-row").forEach((el) => {
+        el.previousElementSibling?.classList.remove("editor-open");
+        el.remove();
+      });
+      openEditorId = r.id;
+      tr.classList.add("editor-open");
+      const row = document.createElement("tr");
+      row.className = "editor-row";
+      const cell = document.createElement("td");
+      cell.colSpan = 6;
+      cell.appendChild(buildEditorForm(r));
+      row.appendChild(cell);
+      tr.after(row);
+    }
+
+    function buildEditorForm(r) {
+      const root = document.createElement("div");
+      root.className = "round-editor";
+
+      const field = (labelText, el) => {
+        const wrap = document.createElement("label");
+        wrap.className = "field";
+        const span = document.createElement("span");
+        span.textContent = labelText;
+        wrap.append(span, el);
+        return wrap;
+      };
+
+      const question = document.createElement("input");
+      question.value = r.question;
+      root.appendChild(field("Question / title", question));
+
+      const text = document.createElement("textarea");
+      text.rows = Math.min(14, Math.max(4, (r.text || "").split("\n").length + 1));
+      text.value = r.text || "";
+      root.appendChild(field("Narration text (spoken + shown; audio is generated from this)", text));
+
+      const audio = document.createElement("input");
+      audio.value = r.audio || "";
+      audio.placeholder = "file in content/audio/, e.g. k2_intro.mp3";
+      audio.classList.add("mono");
+
+      const duration = document.createElement("input");
+      duration.type = "number";
+      duration.step = "any";
+      duration.min = "0";
+      duration.value = r.duration_s;
+      const grace = document.createElement("input");
+      grace.type = "number";
+      grace.step = "any";
+      grace.min = "0";
+      grace.value = r.grace_s;
+
+      const timing = document.createElement("div");
+      timing.className = "field-grid";
+      timing.append(
+        field("Audio file", audio),
+        field("Duration (s, 0 = manual advance)", duration),
+        field("Grace (s)", grace),
+      );
+      root.appendChild(timing);
+
+      const labelInputs = {};
+      const labelKeys = Object.keys(r.form_labels || {});
+      if (labelKeys.length) {
+        const grid = document.createElement("div");
+        grid.className = "field-grid";
+        for (const key of labelKeys) {
+          const input = document.createElement("input");
+          input.value = r.form_labels[key];
+          labelInputs[key] = input;
+          grid.appendChild(field(`Label — ${key}`, input));
+        }
+        root.appendChild(field(`Form labels (${r.form})`, grid));
+      }
+
+      const optionInputs = [];
+      if ((r.options || []).length) {
+        const list = document.createElement("div");
+        list.style.display = "grid";
+        list.style.gap = "0.45rem";
+        for (const o of r.options) {
+          const row = document.createElement("div");
+          row.className = "option-row";
+          const zone = document.createElement("span");
+          zone.className = "zone-chip";
+          zone.textContent = o.zone;
+          const input = document.createElement("input");
+          input.value = o.label;
+          optionInputs.push({ option: o, input });
+          row.append(zone, input);
+          list.appendChild(row);
+        }
+        root.appendChild(field("Answer options (zones are set via scripts/import_content.py)", list));
+      }
+
+      const actionsEl = document.createElement("div");
+      actionsEl.className = "editor-actions";
+      const save = document.createElement("button");
+      save.className = "primary";
+      save.textContent = "Save changes";
+      const cancel = document.createElement("button");
+      cancel.className = "ghost";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", loadContent);
+      actionsEl.append(save, cancel);
+      root.appendChild(actionsEl);
+
+      save.addEventListener("click", async () => {
+        const fields = {
+          question: question.value.trim(),
+          text: text.value.trim() ? text.value : null,
+          audio: audio.value.trim() || null,
+          duration_s: parseFloat(duration.value),
+          grace_s: parseFloat(grace.value),
+        };
+        if (!fields.question) { toast("question must not be empty", true); return; }
+        if (!Number.isFinite(fields.duration_s) || !Number.isFinite(fields.grace_s)) {
+          toast("duration/grace must be numbers", true);
+          return;
+        }
+        if (labelKeys.length) {
+          fields.form_labels = Object.fromEntries(
+            labelKeys.map((k) => [k, labelInputs[k].value])
+          );
+        }
+        if (optionInputs.length) {
+          fields.options = optionInputs.map(({ option, input }) => ({
+            ...option, label: input.value,
+          }));
+        }
+        save.disabled = true;
+        try {
+          const resp = await fetch(`/api/admin/content/rounds/${encodeURIComponent(r.id)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(fields),
+          });
+          if (!resp.ok) {
+            const detail = (await resp.json().catch(() => ({}))).detail;
+            throw new Error(detail || `save failed (${resp.status})`);
+          }
+          const res = await resp.json();
+          toast(res.reloaded
+            ? `Saved ${r.id}`
+            : `Saved ${r.id} — not live yet (${res.detail}); reload content after the round`);
+          await loadContent();
+        } catch (err) {
+          toast(err.message, true);
+          save.disabled = false;
+        }
+      });
+
+      return root;
+    }
+
+    async function deleteRound(roundId, btn) {
+      if (!confirm(`Delete round "${roundId}"? This cannot be undone.`)) return;
+      btn.disabled = true;
+      try {
+        const resp = await fetch(`/api/admin/content/rounds/${encodeURIComponent(roundId)}`, {
+          method: "DELETE",
+        });
+        if (!resp.ok) {
+          const detail = (await resp.json().catch(() => ({}))).detail;
+          throw new Error(detail || `delete failed (${resp.status})`);
+        }
+        const res = await resp.json();
+        toast(res.reloaded
+          ? `Deleted ${roundId}`
+          : `Deleted ${roundId} — not live yet (${res.detail}); reload content after the round`);
+        await loadContent();
+      } catch (err) {
+        toast(err.message, true);
+        btn.disabled = false;
+      }
+    }
+
+    // Option zones are logical per-question ids for every form except
+    // "choice" (server/zones.py resolves them from floor position + option
+    // order, not a fixed name) — so only "choice" needs a real TrackingBox
+    // zone id typed in by hand. Mirrors server/content.py's FORM_LAYOUTS /
+    // FORM_REQUIRED_LABELS / server/zones.py's OPTION_COUNTS.
+    const FORM_META = {
+      choice: { labels: [], defaultCount: 2, manualZones: true, defaultLabels: ["Option A", "Option B"] },
+      scale: { labels: ["left", "right"], defaultCount: 3, manualZones: false, defaultLabels: ["Left", "Middle", "Right"] },
+      scale3: { labels: ["left", "middle", "right"], defaultCount: 3, manualZones: false, defaultLabels: ["Left", "Middle", "Right"] },
+      cross: { labels: ["x_left", "x_right", "y_top", "y_bottom"], defaultCount: 4, manualZones: false, fixedCount: true, defaultLabels: ["Top-left", "Top-right", "Bottom-left", "Bottom-right"] },
+      quadrants: { labels: [], defaultCount: 4, manualZones: false, fixedCount: true, defaultLabels: ["Top-left", "Top-right", "Bottom-left", "Bottom-right"] },
+      rings: { labels: ["center", "edge"], defaultCount: 3, manualZones: false, defaultLabels: ["Center", "Middle", "Outer"] },
+    };
+
+    let createPanelOpen = false;
+
+    function toggleCreatePanel() {
+      createPanelOpen = !createPanelOpen;
+      const panel = $("create-round-panel");
+      panel.innerHTML = "";
+      panel.style.display = createPanelOpen ? "block" : "none";
+      if (createPanelOpen) panel.appendChild(buildCreateForm());
+    }
+
+    function buildCreateForm() {
+      const root = document.createElement("div");
+      root.className = "round-editor";
+
+      const field = (labelText, el) => {
+        const wrap = document.createElement("label");
+        wrap.className = "field";
+        const span = document.createElement("span");
+        span.textContent = labelText;
+        wrap.append(span, el);
+        return wrap;
+      };
+
+      const idInput = document.createElement("input");
+      idInput.placeholder = "unique id, e.g. arbeit_9";
+      idInput.classList.add("mono");
+
+      const afterSelect = document.createElement("select");
+      const endOpt = document.createElement("option");
+      endOpt.value = "";
+      endOpt.textContent = "(at the end)";
+      afterSelect.appendChild(endOpt);
+      (showContent?.rounds || []).forEach((r) => {
+        const opt = document.createElement("option");
+        opt.value = r.id;
+        opt.textContent = `after: ${r.id}`;
+        afterSelect.appendChild(opt);
+      });
+
+      const idGrid = document.createElement("div");
+      idGrid.className = "field-grid";
+      idGrid.append(field("Round id", idInput), field("Insert position", afterSelect));
+      root.appendChild(idGrid);
+
+      const typeSelect = document.createElement("select");
+      ["majority", "minority", "correct_zone", "narration"].forEach((t) => {
+        const opt = document.createElement("option");
+        opt.value = t;
+        opt.textContent = t;
+        typeSelect.appendChild(opt);
+      });
+
+      const formField = (() => {
+        const formSelect = document.createElement("select");
+        Object.keys(FORM_META).forEach((f) => {
+          const opt = document.createElement("option");
+          opt.value = f;
+          opt.textContent = f;
+          formSelect.appendChild(opt);
+        });
+        formSelect.value = "scale";
+        return { select: formSelect, wrap: field("Form", formSelect) };
+      })();
+
+      const typeGrid = document.createElement("div");
+      typeGrid.className = "field-grid";
+      typeGrid.append(field("Type", typeSelect), formField.wrap);
+      root.appendChild(typeGrid);
+
+      const question = document.createElement("input");
+      question.placeholder = "Question / title";
+      root.appendChild(field("Question / title", question));
+
+      const text = document.createElement("textarea");
+      text.rows = 4;
+      root.appendChild(field("Narration text (spoken + shown; audio is generated from this)", text));
+
+      const audio = document.createElement("input");
+      audio.placeholder = "file in content/audio/, e.g. arbeit_9.mp3";
+      audio.classList.add("mono");
+      const duration = document.createElement("input");
+      duration.type = "number"; duration.step = "any"; duration.min = "0"; duration.value = "20";
+      const grace = document.createElement("input");
+      grace.type = "number"; grace.step = "any"; grace.min = "0"; grace.value = "5";
+      const points = document.createElement("input");
+      points.type = "number"; points.step = "1"; points.min = "0"; points.value = "0";
+
+      const timing = document.createElement("div");
+      timing.className = "field-grid";
+      timing.append(
+        field("Audio file", audio),
+        field("Duration (s, 0 = manual advance)", duration),
+        field("Grace (s)", grace),
+        field("Points", points),
+      );
+      root.appendChild(timing);
+
+      const labelsWrap = document.createElement("div");
+      root.appendChild(labelsWrap);
+      const optionsWrap = document.createElement("div");
+      root.appendChild(optionsWrap);
+
+      let optionRows = []; // {row, zone, label, correct}
+      let labelInputs = {};
+
+      function addOptionRow(meta, list, labelText) {
+        const idx = optionRows.length;
+        const row = document.createElement("div");
+        row.className = "option-row";
+        let correctInput = null;
+        if (typeSelect.value === "correct_zone") {
+          correctInput = document.createElement("input");
+          correctInput.type = "radio";
+          correctInput.name = "create-correct";
+          row.appendChild(correctInput);
+        }
+        const zone = document.createElement("input");
+        zone.className = "mono zone-chip";
+        zone.style.minWidth = "8em";
+        zone.readOnly = !meta.manualZones;
+        zone.placeholder = meta.manualZones ? "real TrackingBox zone id" : "auto";
+        zone.value = meta.manualZones ? "" : `${idInput.value.trim() || "round"}_o${idx + 1}`;
+        const label = document.createElement("input");
+        label.placeholder = "label";
+        label.value = labelText || "";
+        row.append(zone, label);
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "small ghost";
+        removeBtn.textContent = "×";
+        removeBtn.addEventListener("click", () => {
+          if (meta.fixedCount) { toast(`${formField.select.value} needs exactly ${meta.defaultCount} options`, true); return; }
+          if (optionRows.length <= 2) { toast("at least 2 options required", true); return; }
+          row.remove();
+          optionRows = optionRows.filter((o) => o.row !== row);
+        });
+        row.append(removeBtn);
+        list.appendChild(row);
+        optionRows.push({ row, zone, label, correct: correctInput || null });
+      }
+
+      function renderFormFields() {
+        const isNarration = typeSelect.value === "narration";
+        formField.wrap.style.display = isNarration ? "none" : "";
+        labelsWrap.innerHTML = "";
+        optionsWrap.innerHTML = "";
+        optionRows = [];
+        labelInputs = {};
+        if (isNarration) return;
+
+        const meta = FORM_META[formField.select.value];
+        if (meta.labels.length) {
+          const grid = document.createElement("div");
+          grid.className = "field-grid";
+          for (const key of meta.labels) {
+            const input = document.createElement("input");
+            labelInputs[key] = input;
+            grid.appendChild(field(`Label — ${key}`, input));
+          }
+          labelsWrap.appendChild(field(`Form labels (${formField.select.value})`, grid));
+        }
+
+        const list = document.createElement("div");
+        list.style.display = "grid";
+        list.style.gap = "0.45rem";
+        optionsWrap.appendChild(field("Answer options", list));
+        for (let i = 0; i < meta.defaultCount; i++) addOptionRow(meta, list, meta.defaultLabels[i] || "");
+
+        if (!meta.fixedCount) {
+          const addBtn = document.createElement("button");
+          addBtn.type = "button";
+          addBtn.className = "small ghost";
+          addBtn.textContent = "+ Add option";
+          addBtn.addEventListener("click", () => addOptionRow(meta, list, ""));
+          optionsWrap.appendChild(addBtn);
+        }
+      }
+
+      typeSelect.addEventListener("change", renderFormFields);
+      formField.select.addEventListener("change", renderFormFields);
+      idInput.addEventListener("input", () => {
+        const meta = FORM_META[formField.select.value];
+        if (meta.manualZones) return;
+        optionRows.forEach(({ zone }, idx) => {
+          zone.value = `${idInput.value.trim() || "round"}_o${idx + 1}`;
+        });
+      });
+      renderFormFields();
+
+      const actionsEl = document.createElement("div");
+      actionsEl.className = "editor-actions";
+      const create = document.createElement("button");
+      create.className = "primary";
+      create.textContent = "Create round";
+      const cancel = document.createElement("button");
+      cancel.className = "ghost";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", toggleCreatePanel);
+      actionsEl.append(create, cancel);
+      root.appendChild(actionsEl);
+
+      create.addEventListener("click", async () => {
+        const roundId = idInput.value.trim();
+        if (!roundId) { toast("round id is required", true); return; }
+        if (!question.value.trim()) { toast("question must not be empty", true); return; }
+        const isNarration = typeSelect.value === "narration";
+
+        const round = {
+          id: roundId,
+          question: question.value.trim(),
+          type: typeSelect.value,
+          duration_s: parseFloat(duration.value) || 0,
+          grace_s: parseFloat(grace.value) || 0,
+          points: parseInt(points.value, 10) || 0,
+          text: text.value.trim() ? text.value : null,
+          audio: audio.value.trim() || null,
+        };
+
+        if (!isNarration) {
+          round.form = formField.select.value;
+          if (Object.keys(labelInputs).length) {
+            round.form_labels = Object.fromEntries(
+              Object.entries(labelInputs).map(([k, inp]) => [k, inp.value])
+            );
+          }
+          round.options = optionRows.map(({ zone, label, correct }) => ({
+            zone: zone.value.trim(),
+            label: label.value.trim(),
+            correct: !!(correct && correct.checked),
+          }));
+          if (round.options.some((o) => !o.zone)) {
+            toast("every option needs a zone id", true);
+            return;
+          }
+        }
+
+        create.disabled = true;
+        try {
+          const resp = await fetch("/api/admin/content/rounds", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ round, after_id: afterSelect.value || null }),
+          });
+          if (!resp.ok) {
+            const detail = (await resp.json().catch(() => ({}))).detail;
+            throw new Error(detail || `create failed (${resp.status})`);
+          }
+          const res = await resp.json();
+          toast(res.reloaded
+            ? `Created ${roundId}`
+            : `Created ${roundId} — not live yet (${res.detail}); reload content after the round`);
+          toggleCreatePanel();
+          await loadContent();
+        } catch (err) {
+          toast(err.message, true);
+          create.disabled = false;
+        }
+      });
+
+      return root;
+    }
+
+    async function generateAudio(roundId, btn) {
+      const voiceOverride = $("tts-voice").value.trim();
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Generating…";
+      try {
+        const res = await post(
+          `/api/admin/content/rounds/${encodeURIComponent(roundId)}/tts`,
+          voiceOverride ? { voice_id: voiceOverride } : {},
+        );
+        toast(`Voice generated for ${roundId} (${(res.bytes / 1024).toFixed(0)} kB)${res.reloaded ? "" : " — reload content after the round"}`);
+        await loadContent();
+        return true;
+      } catch (err) {
+        toast(`${roundId}: ${err.message}`, true);
+        btn.disabled = false;
+        btn.textContent = original;
+        return false;
+      }
+    }
+
+    $("btn-tts-missing").addEventListener("click", async () => {
+      if (!showContent) return;
+      const missing = showContent.rounds.filter((r) => !r.audio_exists);
+      if (!missing.length) { toast("Every step already has audio"); return; }
+      if (!confirm(`Generate ElevenLabs audio for ${missing.length} step(s)? This uses API credits.`)) return;
+      const btn = $("btn-tts-missing");
+      btn.disabled = true;
+      for (let i = 0; i < missing.length; i++) {
+        btn.textContent = `Generating ${i + 1}/${missing.length}…`;
+        const ok = await generateAudio(missing[i].id, document.createElement("button"));
+        if (!ok) break; // the per-round toast already explains the failure
+      }
+      btn.textContent = "Generate missing audio";
+      btn.disabled = !ttsReady();
+    });
+
+    $("btn-add-round").addEventListener("click", toggleCreatePanel);
+
     async function refreshHealth() {
       try {
         const resp = await fetch("/health");
@@ -685,7 +1354,7 @@
     // ---------------------------------------------------------------- //
     connectAdmin();
     connectTd();
-    loadZones();
+    loadContent();
     refreshRound();
     refreshScores();
     refreshHealth();
