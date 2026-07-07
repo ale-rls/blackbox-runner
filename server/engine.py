@@ -235,7 +235,7 @@ class GameEngine:
         rt.opened_at = time.time()
         self._current = rt
         await self._db.update_round_state(
-            row_id, RoundState.ACTIVE.value, rt.opened_at, None
+            row_id, RoundState.ACTIVE.value, rt.opened_at, None, self.round_payload(rt)
         )
 
         self._publish(EngineEvent("round_opened", self.round_payload(rt)))
@@ -326,7 +326,8 @@ class GameEngine:
         # Phase transition writes stay strictly sequential — crash recovery
         # (see load()) keys off which transition landed in the DB.
         await self._db.update_round_state(
-            rt.row_id, RoundState.CLOSING.value, rt.opened_at, rt.closed_at
+            rt.row_id, RoundState.CLOSING.value, rt.opened_at, rt.closed_at,
+            self.round_payload(rt),
         )
 
         # Narration has no answers to capture — every player would just be
@@ -374,11 +375,27 @@ class GameEngine:
         rt.tally = tally
         rt.winning_zones = self._winning_zones(rt)
         rt.state = RoundState.REVEALED
+        reveal_payload = self.round_payload(rt) | {
+            "tally": rt.tally,
+            "winning_zones": rt.winning_zones,
+        }
         # Sequential on purpose (see _do_close): recovery semantics depend
-        # on the closing -> revealed -> done write order.
+        # on the closing -> revealed -> done write order. The reveal payload
+        # (tally + winners) rides the same PATCH onto the public rounds record.
         await self._db.update_round_state(
-            rt.row_id, RoundState.REVEALED.value, rt.opened_at, rt.closed_at
+            rt.row_id, RoundState.REVEALED.value, rt.opened_at, rt.closed_at, reveal_payload
         )
+
+        # Public per-player projection: each phone reads its *own* answer from
+        # player_reveals (the answers table itself stays superuser-only).
+        reveal_writes = [
+            self._db.record_player_reveal(
+                self.session_id, rt.row_id, player_id, zone, resolved
+            )
+            for player_id, (zone, resolved) in rt.answers.items()
+        ]
+        if reveal_writes:
+            await asyncio.gather(*reveal_writes)
 
         score_writes = [
             self._db.record_score_event(
@@ -390,13 +407,7 @@ class GameEngine:
         if score_writes:
             await asyncio.gather(*score_writes)
 
-        self._publish(
-            EngineEvent(
-                "reveal",
-                self.round_payload(rt)
-                | {"tally": rt.tally, "winning_zones": rt.winning_zones},
-            )
-        )
+        self._publish(EngineEvent("reveal", reveal_payload))
         scores = await self.scores()
         self._publish(EngineEvent("scores_updated", {"scores": scores}))
         rt.state = RoundState.DONE

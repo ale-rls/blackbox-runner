@@ -18,11 +18,16 @@ Design notes (mirrors server/pocketbase_client.py's expectations):
 * All fields are required=false: PocketBase's "required" means "non-empty",
   and 0/"" are legitimate values for several columns. Validation lives in
   the Python layer (content.py / enums), as it always has.
-* Rules: null = superuser only. ``rounds`` and ``score_events`` get public
-  read ("" list/view) so the Svelte player frontend (issue #17) can
-  subscribe to realtime without credentials; everything else — including
-  ``answers``, which would expose each player's individual choices — stays
-  superuser-only.
+* Rules: null = superuser only. The deployed player frontend (issue #16)
+  has no route to the venue game server, so everything it reads or writes
+  goes through PocketBase directly: ``rounds``, ``score_events``,
+  ``players``, ``game_state`` (available GIDs) and ``player_reveals`` (each
+  player's own answer) get public read; ``claim_requests`` additionally
+  gets public *create* so a phone can submit a claim. The game server
+  consumes ``claim_requests`` over the realtime stream and performs the
+  actual binding. ``answers`` — which would expose every player's
+  individual choice — stays superuser-only; the public ``player_reveals``
+  projection only ever holds a player's *own* result.
 """
 
 from __future__ import annotations
@@ -39,6 +44,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from server.config import Settings  # noqa: E402
 
 PUBLIC_READ = {"listRule": "", "viewRule": ""}
+# claim_requests also needs public create: the phone POSTs its claim with
+# no credentials. update/delete stay superuser-only (the game server writes
+# the result back), so a phone can submit but not forge a decision.
+PUBLIC_CREATE = {"createRule": ""}
 
 
 def _collections(session_id: str, rounds_id: str) -> list[dict]:
@@ -74,6 +83,9 @@ def _collections(session_id: str, rounds_id: str) -> list[dict]:
             "indexes": [
                 "CREATE UNIQUE INDEX idx_players_session_key ON players (session, player_key)"
             ],
+            # Public read so the deployed phone can subscribe to its own
+            # player record (bound/lost/orphaned state) with no credentials.
+            **PUBLIC_READ,
         },
         {
             "name": "binding_events",
@@ -159,6 +171,64 @@ def _collections(session_id: str, rounds_id: str) -> list[dict]:
                 "CREATE UNIQUE INDEX idx_content_rounds_rid ON content_rounds (round_id)",
             ],
         },
+        {
+            # Singleton (one row) holding the live list of GIDs that are
+            # currently tracked but unbound — what a phone is allowed to
+            # claim. The game server rewrites it whenever the set changes;
+            # the phone subscribes for realtime updates.
+            "name": "game_state",
+            "type": "base",
+            "fields": [
+                # The active session id, so the phone filters its player and
+                # reveal records to the current show (a returning player_key
+                # may still have stale rows from a previous session).
+                f("session_id", "text"),
+                f("available_gids", "json"),
+                f("updated_at", "number"),
+            ],
+            **PUBLIC_READ,
+        },
+        {
+            # A phone's claim submission. The phone creates a row (public
+            # create); the game server, subscribed over realtime, runs the
+            # real binding and PATCHes status/detail back. Public read so the
+            # phone can watch its own request resolve (or fail).
+            "name": "claim_requests",
+            "type": "base",
+            "fields": [
+                f("player_key", "text"),
+                f("gid", "json"),
+                f("display_name", "text"),
+                # status: pending -> done | error. detail carries the error
+                # message (e.g. "gid 12 is not currently active").
+                f("status", "text"),
+                f("detail", "text"),
+                f("at", "number"),
+            ],
+            **PUBLIC_READ,
+            **PUBLIC_CREATE,
+        },
+        {
+            # Per-player reveal projection: each player's *own* answer for a
+            # revealed round, so the phone can show "you were here" without
+            # the private answers table being readable. One row per player
+            # per round.
+            "name": "player_reveals",
+            "type": "base",
+            "fields": [
+                rel("session", session_id),
+                rel("round", rounds_id),
+                f("player_key", "text"),
+                f("zone", "text"),
+                f("resolved", "text"),
+                f("at", "number"),
+            ],
+            "indexes": [
+                "CREATE UNIQUE INDEX idx_player_reveals_round_player "
+                "ON player_reveals (round, player_key)"
+            ],
+            **PUBLIC_READ,
+        },
     ]
 
 
@@ -182,6 +252,11 @@ ROUNDS_DEF = {
         {"name": "state", "type": "text"},
         {"name": "opened_at", "type": "json"},
         {"name": "closed_at", "type": "json"},
+        # The full round payload the player frontend renders (question,
+        # options, form, audio ref, and at reveal tally/winning_zones),
+        # denormalized here so the phone gets everything from one public
+        # ``rounds`` realtime event — no join against superuser-only content.
+        {"name": "payload", "type": "json"},
     ],
     **PUBLIC_READ,
 }
@@ -256,7 +331,11 @@ async def main() -> int:
         for defn in _collections(sessions["id"], rounds["id"]):
             await ensure(defn)
 
-    print("Done. rounds + score_events are public-read; everything else superuser-only.")
+    print(
+        "Done. Public-read: rounds, score_events, players, game_state, "
+        "player_reveals; claim_requests is public read+create; "
+        "answers and everything else stay superuser-only."
+    )
     return 0
 
 

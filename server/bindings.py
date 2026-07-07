@@ -170,6 +170,10 @@ class BindingManager:
         pid = self._by_gid.get(gid)
         return self._players.get(pid) if pid else None
 
+    def bound_gids(self) -> set[int]:
+        """GIDs currently bound to some player — i.e. *not* claimable."""
+        return set(self._by_gid)
+
     # ------------------------------------------------------------------ #
     # Subscription (admin board / TD)
     # ------------------------------------------------------------------ #

@@ -1,5 +1,8 @@
 <script>
-  let { playerId, onclaim } = $props();
+  // `available` is the live list of claimable GIDs (null until it loads); we
+  // validate the typed number against it for instant feedback, but the server
+  // stays the final authority (a race is still rejected server-side).
+  let { playerId, available = null, onclaim } = $props();
 
   let gidText = $state("");
   let error = $state("");
@@ -9,6 +12,10 @@
     const gid = parseInt(gidText, 10);
     if (!Number.isFinite(gid)) {
       error = "Gib die Nummer ein, die dir gezeigt wurde.";
+      return;
+    }
+    if (available && !available.includes(gid)) {
+      error = "Diese Nummer ist gerade nicht verfügbar. Prüf deinen Punkt.";
       return;
     }
     busy = true;

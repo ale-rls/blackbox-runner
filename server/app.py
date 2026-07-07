@@ -36,6 +36,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("blackbox_runner.app")
 
 _POSITION_LOG_INTERVAL_S = 5.0
+# How often the server recomputes the claimable-GID list from in-memory
+# tracking/binding state. It only writes to PocketBase when the set actually
+# changed (publish_available_gids dedupes), so the phone's realtime
+# subscription still only fires on a real change; this is just the recompute
+# cadence, not a network poll.
+_AVAILABLE_GIDS_INTERVAL_S = 1.0
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 _PLAYER_BUILD = Path(__file__).resolve().parent.parent / "frontend" / "player" / "build"
 
@@ -76,6 +82,89 @@ async def _watch_for_ritual_prompts(
                 )
     finally:
         bindings.unsubscribe(queue)
+
+
+async def _publish_available_gids(
+    db: PocketBaseClient,
+    bindings: BindingManager,
+    tracking: TrackingClient,
+    session_id: str,
+) -> None:
+    """Keep PocketBase's ``game_state.available_gids`` in sync with the GIDs
+    that are tracked but unbound — the numbers a phone is allowed to claim
+    (issue #16). The deployed player frontend, which can't reach this server,
+    subscribes to that list over PocketBase realtime.
+
+    Recompute is cheap (in-memory state) and the write is a no-op when the
+    set is unchanged, so the phone only ever sees genuine changes.
+    """
+    while True:
+        try:
+            bound = bindings.bound_gids()
+            available = [
+                gid
+                for gid, state in tracking.get_all().items()
+                if state.visible and gid not in bound
+            ]
+            await db.publish_available_gids(session_id, available)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Failed to publish available_gids")
+        await asyncio.sleep(_AVAILABLE_GIDS_INTERVAL_S)
+
+
+async def _process_claim_request(
+    db: PocketBaseClient, bindings: BindingManager, record: dict
+) -> None:
+    """Perform one claim submitted by a phone through PocketBase, then write
+    the outcome back onto its ``claim_requests`` row so the phone (watching
+    that row) sees success or the exact error. Idempotent: a request already
+    satisfied resolves as done rather than tripping the already-bound guard,
+    so a redelivered realtime event or a reconnect catch-up is harmless."""
+    request_id = record.get("id")
+    if not request_id:
+        return
+    player_key = record.get("player_key") or ""
+    display_name = record.get("display_name") or None
+    try:
+        gid = int(record.get("gid"))
+    except (TypeError, ValueError):
+        await db.resolve_claim_request(request_id, "error", "Ungültige Nummer")
+        return
+
+    existing = bindings.get(player_key)
+    if existing is not None and existing.state == PlayerState.BOUND and existing.gid == gid:
+        await db.resolve_claim_request(request_id, "done", "")
+        return
+    try:
+        await bindings.claim(player_key, gid, display_name)
+    except BindingError as exc:
+        await db.resolve_claim_request(request_id, "error", str(exc))
+        return
+    await db.resolve_claim_request(request_id, "done", "")
+
+
+async def _consume_claim_requests(db: PocketBaseClient, bindings: BindingManager) -> None:
+    """Bridge the phone's PocketBase claim submissions to the real binding
+    layer. Each pass catches up on anything still pending (covering rows
+    created while the realtime stream was down), then follows the realtime
+    stream for new ones. On any stream error it reconnects and catches up
+    again, so no submission is lost."""
+    while True:
+        try:
+            for record in await db.load_pending_claim_requests():
+                await _process_claim_request(db, bindings, record)
+            async for _coll, action, record in db.realtime_events(["claim_requests"]):
+                if action in ("create", "update") and (
+                    record.get("status") or "pending"
+                ) == "pending":
+                    await _process_claim_request(db, bindings, record)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("Claim-request consumer error; reconnecting: %s", exc)
+            await asyncio.sleep(1.0)
 
 
 class ClaimRequest(BaseModel):
@@ -170,13 +259,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ritual_task = asyncio.create_task(
             _watch_for_ritual_prompts(bindings, app.state.engine, settings.ritual_zone_id)
         )
+        # Issue #16: the deployed phone reaches only PocketBase, so the server
+        # publishes the claimable-GID list there and consumes claim
+        # submissions back off the realtime stream.
+        gids_task = asyncio.create_task(
+            _publish_available_gids(db, bindings, tracking, session_id)
+        )
+        claim_task = asyncio.create_task(_consume_claim_requests(db, bindings))
         try:
             yield
         finally:
             tracking.stop()
             app.state.engine.shutdown()
             bindings.shutdown()
-            for task in (tracking_task, bindings_task, log_task, ritual_task):
+            for task in (
+                tracking_task, bindings_task, log_task, ritual_task, gids_task, claim_task
+            ):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task

@@ -2,109 +2,75 @@
   import ClaimForm from "$lib/components/ClaimForm.svelte";
   import RoundPanel from "$lib/components/RoundPanel.svelte";
   import { audio, attachElement, unlockAudio, playAudio, roundAudioSrc } from "$lib/audio.svelte.js";
-  import { connectPocketBase } from "$lib/pb.js";
-  import { gameFetch, gameWsUrl } from "$lib/config.js";
+  import { connectPlayer, submitClaim } from "$lib/pb.js";
   import { onMount } from "svelte";
 
   let { playerId } = $props();
 
   let player = $state(null);
-  let round = $state(null);       // latest round payload from the game WS
-  let reveal = $state(null);      // reveal payload once the round is revealed
+  let round = $state(null);       // latest round payload (the public rounds.payload)
+  let reveal = $state(null);      // same payload once the round is revealed (tally + winners)
   let yourAnswer = $state(null);
   let score = $state(0);
-  let ritual = $state(false);
+  let available = $state(null);   // claimable GIDs; null until game_state loads
   let narrationEl = $state(null);
-  let wasBound = false;
+
+  // Which round's narration/question audio we've already started, so a fresh
+  // active round (or binding into one already running) plays exactly once.
+  let playedRoundId = null;
 
   const bound = $derived(player?.state === "bound");
   const lostOrOrphaned = $derived(player?.state === "lost" || player?.state === "orphaned");
+  // The ritual prompt ("walk to the glowing corner") is a cue the deployed
+  // phone can't receive, but a player is asked to do the ritual exactly when
+  // they orphan — so derive it from the persisted state instead.
+  const ritual = $derived(player?.state === "orphaned");
 
   $effect(() => { if (narrationEl) attachElement(narrationEl); });
 
-  function applyPlayer(p) {
-    player = p;
-    if (p.state === "bound") {
-      ritual = false; // rebound: ritual (if any) is resolved
-      if (!wasBound) connectGameWs();
-      wasBound = true;
+  function playRoundOnce(payload) {
+    if (payload && payload.state === "active" && playedRoundId !== payload.round_id) {
+      playedRoundId = payload.round_id;
+      playAudio(roundAudioSrc(payload));
     }
+  }
+
+  function applyPlayer(p) {
+    const wasBound = player?.state === "bound";
+    player = p;
+    // Just bound into an already-running round: catch up on its audio.
+    if (p.state === "bound" && !wasBound) playRoundOnce(round);
+  }
+
+  function applyRound(payload) {
+    if (payload.round_id !== round?.round_id) {
+      yourAnswer = null; // new round starting
+      playedRoundId = null;
+    }
+    round = payload;
+    reveal = payload.state === "revealed" ? payload : null;
+    if (bound) playRoundOnce(payload);
   }
 
   async function claim(gid) {
     unlockAudio(); // the tap that claims is also the tap that unlocks audio
-    const resp = await gameFetch(`/api/players/${encodeURIComponent(playerId)}/claim`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ gid }),
-    });
-    if (!resp.ok) {
-      const body = await resp.json().catch(() => ({}));
-      throw new Error(body.detail || `Verbindung fehlgeschlagen (${resp.status})`);
-    }
-    applyPlayer(await resp.json());
-  }
-
-  async function poll() {
-    try {
-      const resp = await gameFetch(`/api/players/${encodeURIComponent(playerId)}`);
-      if (resp.ok) applyPlayer(await resp.json());
-    } catch {
-      // network hiccup: keep last known UI, try again next tick
-    }
-  }
-
-  function connectGameWs() {
-    const ws = new WebSocket(gameWsUrl(`/ws/player/${encodeURIComponent(playerId)}`));
-    ws.onmessage = (evt) => {
-      const msg = JSON.parse(evt.data);
-      if (msg.type === "hello") {
-        round = msg.round;
-        reveal = null;
-        // Joining mid-step: catch up on the running narration/question audio.
-        if (msg.round && msg.round.state === "active") playAudio(roundAudioSrc(msg.round));
-        if (msg.scores && msg.scores[playerId] !== undefined) score = msg.scores[playerId];
-      } else if (msg.type === "round_opened") {
-        round = msg;
-        reveal = null;
-        yourAnswer = null;
-        playAudio(roundAudioSrc(msg));
-      } else if (msg.type === "round_closing" || msg.type === "answers_locked") {
-        round = msg;
-      } else if (msg.type === "reveal") {
-        yourAnswer = msg.your_answer;
-        reveal = msg;
-      } else if (msg.type === "scores_updated") {
-        score = msg.your_score || 0;
-      } else if (msg.type === "ritual_prompt" && msg.player_id === playerId) {
-        ritual = true;
-      }
-    };
-    ws.onclose = () => setTimeout(() => { if (wasBound) connectGameWs(); }, 1500);
+    // submitClaim resolves once the server has bound us; the players
+    // subscription then flips `player` to bound and swaps in the round panel.
+    await submitClaim(playerId, gid);
   }
 
   onMount(() => {
-    // PocketBase realtime (issue #17): score badge fed by the public
-    // score_events collection; round state kept honest straight from the
-    // public rounds collection even if the game WS drops for a moment.
-    connectPocketBase({
+    connectPlayer({
       playerId,
+      onPlayer: applyPlayer,
+      onRound: applyRound,
+      onYourAnswer: (a) => { yourAnswer = a; },
       onScore: (total) => { score = total; },
-      onRoundRecord: (record) => {
-        if (round && record.question_id === round.round_id && !reveal) {
-          if (record.state === "closing" && round.state === "active") {
-            round = { ...round, state: "closing" };
-          }
-        }
-      },
+      onAvailable: (gids) => { available = gids; },
     }).catch(() => {
-      // PocketBase realtime is an enhancement; the game WS remains the
-      // primary channel, so a subscribe failure must never break the page.
+      // Nothing to fall back to — PocketBase is the only backend now — but a
+      // connect failure must not throw out of onMount and blank the page.
     });
-
-    poll();
-    const pollTimer = setInterval(poll, 3000);
-    return () => clearInterval(pollTimer);
   });
 </script>
 
@@ -134,7 +100,7 @@
   {/if}
 
   {#if !bound}
-    <ClaimForm {playerId} onclaim={claim} />
+    <ClaimForm {playerId} {available} onclaim={claim} />
   {:else}
     <RoundPanel {round} {reveal} {yourAnswer} />
   {/if}
