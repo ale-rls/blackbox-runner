@@ -55,8 +55,14 @@ server/
   models.py            # pydantic models incl. copied TrackingBox message shapes
   content.py           # validates rounds & questions (pydantic models)
   content_db.py        # loads the show from the DB (runtime source of truth)
+frontend/
+  player/              # Svelte player app (Vite): claim flow, all question
+                       # forms, narration audio, PocketBase realtime for
+                       # scores/round state. `npm run build` -> dist/,
+                       # served by the game server at /p/{player_id}.
 web/
-  player/              # phone page (one per player ID)
+  player/              # (legacy) phone page — served only if the Svelte
+                       # build (frontend/player/dist) is absent
   admin/               # operator dashboard: round control, binding board,
                         # floor map, TD cue log, scoreboard
 content/
@@ -117,6 +123,26 @@ seeded from the authoring copy with `make import-content` (or
 edit you want the server to pick up.
 
 Run tests with `make test`.
+
+### Player frontend (Svelte)
+
+The player page served at `/p/{player_id}` is the Svelte app in
+`frontend/player/`. Its production build is committed (`dist/`), so
+running the show needs no Node — but after editing the frontend, rebuild
+and commit:
+
+```bash
+cd frontend/player
+npm install        # once
+npm run build      # writes dist/, which the game server serves
+npm run dev        # dev server with proxy to a game server on :8100
+```
+
+It talks to the game server's REST/WS endpoints exactly like the legacy
+page, plus PocketBase realtime (public `rounds`/`score_events`
+collections — the browser holds no credentials; it learns the PocketBase
+URL from `GET /api/config`). If `dist/` is missing, the server falls back
+to the archived `web/player/index.html`.
 
 Note: TrackingBox's default mock simulator churns GIDs quite aggressively
 (people can disappear and respawn sub-second). That's a good stress test —

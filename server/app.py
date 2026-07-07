@@ -36,6 +36,7 @@ log = logging.getLogger("blackbox_runner.app")
 
 _POSITION_LOG_INTERVAL_S = 5.0
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+_PLAYER_DIST = Path(__file__).resolve().parent.parent / "frontend" / "player" / "dist"
 
 
 async def _log_positions_periodically(client: TrackingClient) -> None:
@@ -530,9 +531,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # -------------------------------------------------------------- #
     # Web: player claim page + admin dashboard
     # -------------------------------------------------------------- #
+    @app.get("/api/config")
+    async def client_config() -> dict:
+        """Runtime config the browser needs — currently just where the
+        player frontend's PocketBase realtime subscriptions should point.
+        Public values only; never credentials."""
+        return {"pocketbase_url": settings.pocketbase_url}
+
     @app.get("/p/{player_id}")
     async def player_page(player_id: str) -> FileResponse:
+        # The Svelte build (frontend/player, issue #17) when present;
+        # web/player/index.html stays as the archived fallback.
+        dist_index = _PLAYER_DIST / "index.html"
+        if dist_index.is_file():
+            return FileResponse(dist_index)
         return FileResponse(_WEB_DIR / "player" / "index.html")
+
+    if (_PLAYER_DIST / "assets").is_dir():
+        app.mount(
+            "/player-app",
+            StaticFiles(directory=_PLAYER_DIST),
+            name="player-app",
+        )
 
     if (_WEB_DIR / "admin").is_dir():
         app.mount("/admin", StaticFiles(directory=_WEB_DIR / "admin", html=True), name="admin")
