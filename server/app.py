@@ -541,7 +541,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             engine.unsubscribe(queue)
 
     # -------------------------------------------------------------- #
-    # Web: player claim page + admin dashboard
+    # Web: player/listen pages + admin dashboard
     # -------------------------------------------------------------- #
     @app.get("/api/config")
     async def client_config() -> dict:
@@ -558,6 +558,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/p/{player_id}")
     async def player_page(player_id: str) -> FileResponse:
+        if _spa_index.is_file():
+            return FileResponse(_spa_index)
+        return FileResponse(_WEB_DIR / "player" / "index.html")
+
+    @app.get("/listen")
+    async def listen_page() -> FileResponse:
         if _spa_index.is_file():
             return FileResponse(_spa_index)
         return FileResponse(_WEB_DIR / "player" / "index.html")

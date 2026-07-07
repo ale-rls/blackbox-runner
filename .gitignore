@@ -14,3 +14,5 @@ node_modules/
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
 .svelte-kit/
+
+frontend/player/build
