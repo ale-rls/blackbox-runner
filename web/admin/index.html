@@ -205,6 +205,9 @@
     .audio-missing { color: var(--red); }
     .audio-none { color: var(--muted); }
     tr.editor-open td { border-bottom: none; }
+    #editor-rows tr[draggable="true"] { cursor: grab; }
+    #editor-rows tr.dragging { opacity: 0.4; }
+    .drag-handle { color: var(--muted); user-select: none; }
     .round-editor {
       display: grid; gap: 0.8rem; margin: 0.2rem 0 0.8rem;
       background: var(--panel-2); border: 1px solid var(--border-soft);
@@ -761,6 +764,7 @@
     // ---------------------------------------------------------------- //
     let showContent = null; // last GET /api/admin/content payload
     let openEditorId = null;
+    let dragSrcId = null;
 
     async function loadContent() {
       try {
@@ -811,13 +815,23 @@
     function createEditorRow(r, i) {
       const frag = document.createDocumentFragment();
       const tr = document.createElement("tr");
+      tr.draggable = true;
+      tr.dataset.roundId = r.id;
       tr.innerHTML = `
-        <td class="mono">${i + 1}</td>
+        <td class="mono drag-handle" title="Drag to reorder">⠿ ${i + 1}</td>
         <td class="mono">${esc(r.id)}</td>
         <td><span class="tag ${r.type === "narration" ? "narration" : ""}">${esc(r.type === "narration" ? "narration" : r.form)}</span></td>
         <td class="editor-q" title="${esc(r.question)}">${esc(r.question)}</td>
         <td class="mono">${audioCellHtml(r)}</td>
         <td></td>`;
+      tr.addEventListener("dragstart", () => {
+        dragSrcId = r.id;
+        tr.classList.add("dragging");
+      });
+      tr.addEventListener("dragend", () => {
+        tr.classList.remove("dragging");
+        dragSrcId = null;
+      });
       const actions = document.createElement("div");
       actions.className = "row-actions";
       const editBtn = document.createElement("button");
@@ -1002,6 +1016,28 @@
       });
 
       return root;
+    }
+
+    async function reorderRounds(roundIds) {
+      try {
+        const resp = await fetch("/api/admin/content/order", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ round_ids: roundIds }),
+        });
+        if (!resp.ok) {
+          const detail = (await resp.json().catch(() => ({}))).detail;
+          throw new Error(detail || `reorder failed (${resp.status})`);
+        }
+        const res = await resp.json();
+        toast(res.reloaded
+          ? "Reordered"
+          : `Reordered — not live yet (${res.detail}); reload content after the round`);
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        await loadContent(); // resync row order (and #s) with what the server actually stored
+      }
     }
 
     async function deleteRound(roundId, btn) {
@@ -1340,6 +1376,33 @@
     });
 
     $("btn-add-round").addEventListener("click", toggleCreatePanel);
+
+    $("editor-rows").addEventListener("dragover", (e) => {
+      if (!dragSrcId) return;
+      e.preventDefault();
+      const rowsEl = $("editor-rows");
+      const dragging = rowsEl.querySelector("tr.dragging");
+      if (!dragging) return;
+      const others = [...rowsEl.querySelectorAll("tr[data-round-id]:not(.dragging)")];
+      const after = others.find((row) => {
+        const rect = row.getBoundingClientRect();
+        return e.clientY < rect.top + rect.height / 2;
+      });
+      if (after == null) {
+        rowsEl.appendChild(dragging);
+      } else {
+        rowsEl.insertBefore(dragging, after);
+      }
+    });
+
+    $("editor-rows").addEventListener("drop", (e) => {
+      if (!dragSrcId) return;
+      e.preventDefault();
+      const roundIds = [...$("editor-rows").querySelectorAll("tr[data-round-id]")].map(
+        (tr) => tr.dataset.roundId
+      );
+      reorderRounds(roundIds);
+    });
 
     async function refreshHealth() {
       try {

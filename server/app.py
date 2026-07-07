@@ -374,6 +374,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         reloaded, detail = _reload_engine(show)
         return {"ok": True, "reloaded": reloaded, "detail": detail, "rounds": len(show.rounds)}
 
+    @app.put("/api/admin/content/order")
+    async def reorder_rounds(body: dict) -> dict:
+        round_ids = body.get("round_ids")
+        if not isinstance(round_ids, list) or not all(isinstance(i, str) for i in round_ids):
+            raise HTTPException(
+                status_code=400, detail="body must include a 'round_ids' list of strings"
+            )
+        try:
+            show = await asyncio.to_thread(
+                show_store.reorder_rounds,
+                db,
+                round_ids,
+                valid_zone_ids=_edit_zone_ids(),
+            )
+        except ContentError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        reloaded, detail = _reload_engine(show)
+        return {"ok": True, "reloaded": reloaded, "detail": detail, "rounds": len(show.rounds)}
+
     @app.post("/api/admin/content/rounds/{round_id}/tts")
     async def generate_round_audio(round_id: str, body: Optional[TTSRequest] = None) -> dict:
         if not settings.elevenlabs_api_key:

@@ -144,3 +144,31 @@ def delete_round(
     )
     db.save_content(version, content_db.rows_from_raw(remaining))
     return show
+
+
+def reorder_rounds(
+    db: Database,
+    round_ids: list[str],
+    *,
+    valid_zone_ids: Optional[set[str]] = None,
+) -> ShowContent:
+    """Reorder the stored show's rounds to match ``round_ids`` and write it
+    back. ``round_ids`` must be exactly the existing round ids, each once —
+    it's the full new order, not a partial move, since that's what a
+    drag-and-drop table naturally hands back.
+    """
+    version, rows = db.load_content()
+    rounds = [content_db.row_to_raw(r) for r in rows]
+    by_id = {r["id"]: r for r in rounds}
+    if sorted(round_ids) != sorted(by_id):
+        raise ContentError("round_ids must be exactly the existing round ids, each once")
+    reordered = [by_id[rid] for rid in round_ids]
+
+    raw: dict = {"rounds": reordered}
+    if version:
+        raw["version"] = version
+    show = validate_show(
+        raw, valid_zone_ids=valid_zone_ids, source="edited show content (database)"
+    )
+    db.save_content(version, content_db.rows_from_raw(reordered))
+    return show
