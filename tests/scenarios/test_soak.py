@@ -17,7 +17,6 @@ import pytest
 
 from server.bindings import BindingManager, PlayerState
 from server.models import AudienceSummary
-from server.persistence import Database
 from server.tracking_client import ChangeEvent, TrackingClient
 
 N_PLAYERS = 60
@@ -28,10 +27,10 @@ def _seed(tracking: TrackingClient, gid: int, floor: tuple[float, float]) -> Non
 
 
 @pytest.mark.asyncio
-async def test_sixty_players_survive_sustained_churn():
-    db = Database(":memory:")
+async def test_sixty_players_survive_sustained_churn(pb):
+    db = pb
     tracking = TrackingClient("ws://unused")
-    session_id = db.create_session()
+    session_id = await db.create_session()
     manager = await BindingManager.load(
         db,
         session_id,
@@ -106,7 +105,7 @@ async def test_sixty_players_survive_sustained_churn():
         # Audit trail is complete and self-consistent: every player has at
         # least a claim event, and every non-claim event has a resolvable
         # reason.
-        events = db.load_binding_events(session_id)
+        events = await db.load_binding_events(session_id)
         assert len(events) >= N_PLAYERS  # at minimum, one claim per player
         by_player: dict[str, list[str]] = {}
         for e in events:
@@ -116,4 +115,3 @@ async def test_sixty_players_survive_sustained_churn():
             assert set(reasons) <= {"claim", "lost", "auto_rebind", "ritual", "operator"}
     finally:
         manager.shutdown()
-        db.close()

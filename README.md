@@ -23,7 +23,7 @@ its `/ws` and `/api/zones` endpoints and never modifies it for game features.
                     ┌──────────────────┐  round/cue WS   ┌────────────────────┐
                     │  TouchDesigner   │◀────────────────│  Game server (new) │
                     │  screen visuals  │                 │  bindings, rounds, │
-                    └──────────────────┘                 │  scoring, SQLite   │
+                    └──────────────────┘                 │  scoring, PocketBase│
                                                          └───┬──────────┬─────┘
                                                              │          │
                                                      player WS      admin WS/REST
@@ -49,13 +49,20 @@ server/
   tracking_client.py   # WS client to TrackingBox: reconnect, snapshot resync
   bindings.py          # player<->GID state machine
   engine.py            # round state machine, timers, zone evaluation, scoring
-  persistence.py       # SQLite (WAL), write-through, crash recovery
+  pocketbase_client.py # PocketBase persistence: write-through, crash recovery
+  persistence.py       # (legacy) SQLite layer, superseded by PocketBase
   replay.py            # post-show timeline / state-at-a-moment reconstruction
   models.py            # pydantic models incl. copied TrackingBox message shapes
   content.py           # validates rounds & questions (pydantic models)
   content_db.py        # loads the show from the DB (runtime source of truth)
+frontend/
+  player/              # Svelte player app (Vite): claim flow, all question
+                       # forms, narration audio, PocketBase realtime for
+                       # scores/round state. `npm run build` -> dist/,
+                       # served by the game server at /p/{player_id}.
 web/
-  player/              # phone page (one per player ID)
+  player/              # (legacy) phone page — served only if the Svelte
+                       # build (frontend/player/dist) is absent
   admin/               # operator dashboard: round control, binding board,
                         # floor map, TD cue log, scoreboard
 content/
@@ -116,6 +123,42 @@ seeded from the authoring copy with `make import-content` (or
 edit you want the server to pick up.
 
 Run tests with `make test`.
+
+### Player frontend (SvelteKit)
+
+The player app lives in `frontend/player/` (SvelteKit, static SPA build).
+Routes: **`/` is the one link to hand to every new audience member** — it
+assigns a fresh seat id and redirects to `/p/{id}`; the id sticks in
+localStorage so re-opening the link returns the same seat. Ushers can
+still hand out explicit `/p/seat-12` links, which then become that
+phone's sticky seat.
+
+The production build is committed (`build/`), so running the show needs
+no Node — but after editing the frontend, rebuild and commit:
+
+```bash
+cd frontend/player
+npm install        # once
+npm run build      # writes build/, which the game server serves
+npm run dev        # dev server with proxy to a game server on :8100
+```
+
+It talks to the game server's REST/WS endpoints exactly like the legacy
+page, plus PocketBase realtime (public `rounds`/`score_events`
+collections — the browser holds no credentials; it learns the PocketBase
+URL from `GET /api/config`). If `build/` is missing, the server falls
+back to the archived `web/player/index.html`.
+
+**Standalone deployment** (e.g. a Coolify static site, separate from the
+game server): build with the game server's public URL baked in —
+
+```bash
+VITE_GAME_URL=https://game.example.com npm run build
+```
+
+— and deploy `build/` to any static host (SPA fallback to `index.html`).
+The game server allows cross-origin API calls, and audio/WS URLs are
+rewritten to point at `VITE_GAME_URL` automatically.
 
 Note: TrackingBox's default mock simulator churns GIDs quite aggressively
 (people can disappear and respawn sub-second). That's a good stress test —

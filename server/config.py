@@ -40,6 +40,12 @@ class Settings:
     reconnect_max_s: float = 30.0
     position_history_seconds: float = 5.0
     db_path: str = "data/blackbox-runner.db"
+    # PocketBase persistence backend (issue #16). Superuser credentials are
+    # server-side only — never sent to browsers. Startup hard-fails if the
+    # instance is unreachable (there is no degraded mode without persistence).
+    pocketbase_url: str = "http://localhost:8090"
+    pocketbase_admin_email: Optional[str] = None
+    pocketbase_admin_password: Optional[str] = None
     content_path: str = "content/show.yaml"
     audio_dir: str = "content/audio"
     rebind_max_distance: float = 0.15
@@ -79,6 +85,13 @@ class Settings:
                 environ.get("POSITION_HISTORY_SECONDS", cls.position_history_seconds)
             ),
             db_path=environ.get("GAME_DB_PATH", cls.db_path),
+            pocketbase_url=environ.get("POCKETBASE_URL", cls.pocketbase_url),
+            pocketbase_admin_email=environ.get(
+                "POCKETBASE_ADMIN_EMAIL", cls.pocketbase_admin_email
+            ),
+            pocketbase_admin_password=environ.get(
+                "POCKETBASE_ADMIN_PASSWORD", cls.pocketbase_admin_password
+            ),
             content_path=environ.get("GAME_CONTENT_PATH", cls.content_path),
             audio_dir=environ.get("GAME_AUDIO_DIR", cls.audio_dir),
             rebind_max_distance=float(

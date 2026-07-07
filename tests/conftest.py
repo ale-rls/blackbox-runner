@@ -14,6 +14,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 import websockets
 
+from fake_pocketbase import FakePocketBase
+
+from server.pocketbase_client import PocketBaseClient
+
 SNAPSHOT = {
     "type": "snapshot",
     "data": {
@@ -152,3 +156,30 @@ def fake_zones_http():
     finally:
         server.shutdown()
         thread.join(timeout=2)
+
+
+@pytest.fixture
+def fake_pocketbase():
+    """In-process fake of PocketBase's records API (tests/fake_pocketbase.py).
+
+    Crash-recovery tests simulate a server restart by constructing a second
+    PocketBaseClient against the same fake — its store outlives clients the
+    way the real instance outlives game-server processes."""
+    fake = FakePocketBase()
+    fake.start()
+    try:
+        yield fake
+    finally:
+        fake.stop()
+
+
+@pytest.fixture
+async def pb(fake_pocketbase):
+    """A connected PocketBaseClient against the fake — the drop-in
+    replacement for the old ':memory:' Database fixture."""
+    client = PocketBaseClient(fake_pocketbase.url, "test@example.com", "test-password")
+    await client.connect()
+    try:
+        yield client
+    finally:
+        await client.close()

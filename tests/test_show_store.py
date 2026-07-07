@@ -8,7 +8,6 @@ import yaml
 
 from server import content_db
 from server.content import ContentError
-from server.persistence import Database
 from server.show_store import update_round
 
 SHOW = """\
@@ -55,32 +54,30 @@ rounds:
 
 
 @pytest.fixture
-def db(tmp_path):
-    database = Database(str(tmp_path / "game.db"))
+async def db(pb):
     raw = yaml.safe_load(SHOW)
-    database.save_content(raw["version"], content_db.rows_from_raw(raw["rounds"]))
-    try:
-        yield database
-    finally:
-        database.close()
+    await pb.save_content(raw["version"], content_db.rows_from_raw(raw["rounds"]))
+    return pb
 
 
-def test_update_question_preserves_other_rounds(db):
-    show = update_round(db, "q1", {"question": "Beer or wine?"})
+@pytest.mark.asyncio
+async def test_update_question_preserves_other_rounds(db):
+    show = await update_round(db, "q1", {"question": "Beer or wine?"})
 
     assert [r.id for r in show.rounds] == ["intro", "q1", "q2"]
     assert show.rounds[1].question == "Beer or wine?"
     assert show.rounds[0].text == "Hallo.\nWillkommen.\n"
 
     # The edit persisted: a fresh load from the DB sees the same show.
-    reloaded = content_db.load_show_db(db)
+    reloaded = await content_db.load_show_db(db)
     assert reloaded.version == "2"
     assert reloaded.rounds[1].question == "Beer or wine?"
     assert reloaded.rounds[0].text == "Hallo.\nWillkommen.\n"
 
 
-def test_update_form_labels_and_option_labels(db):
-    show = update_round(
+@pytest.mark.asyncio
+async def test_update_form_labels_and_option_labels(db):
+    show = await update_round(
         db,
         "q1",
         {
@@ -96,48 +93,53 @@ def test_update_form_labels_and_option_labels(db):
     assert [o.label for o in q1.options] == ["Kaffee", "Tee"]
 
 
-def test_none_removes_field(db):
-    update_round(db, "q1", {"audio": "q1.mp3"})
-    show = update_round(db, "q1", {"audio": None})
+@pytest.mark.asyncio
+async def test_none_removes_field(db):
+    await update_round(db, "q1", {"audio": "q1.mp3"})
+    show = await update_round(db, "q1", {"audio": None})
     assert show.rounds[1].audio is None
-    _, rows = db.load_content()
+    _, rows = await db.load_content()
     assert rows[1].audio is None
 
 
-def test_invalid_edit_leaves_rows_untouched(db):
-    before = db.load_content()
+@pytest.mark.asyncio
+async def test_invalid_edit_leaves_rows_untouched(db):
+    before = await db.load_content()
     # Dropping a required scale label must fail validation, not hit the DB.
     with pytest.raises(ContentError):
-        update_round(db, "q1", {"form_labels": {"left": "only one pole"}})
-    assert db.load_content() == before
+        await update_round(db, "q1", {"form_labels": {"left": "only one pole"}})
+    assert await db.load_content() == before
 
 
-def test_invalid_edit_does_not_touch_other_rounds(db):
-    # save_content is one wipe-and-replace transaction: a rejected edit of
-    # q1 must leave every other round's row byte-identical too.
-    _, before_rows = db.load_content()
+@pytest.mark.asyncio
+async def test_invalid_edit_does_not_touch_other_rounds(db):
+    # A rejected edit of q1 must leave every other round's row untouched
+    # too (validation happens before any write reaches PocketBase).
+    _, before_rows = await db.load_content()
     with pytest.raises(ContentError):
-        update_round(db, "q1", {"options": [{"zone": "answer_a", "label": "lonely"}]})
-    _, after_rows = db.load_content()
+        await update_round(db, "q1", {"options": [{"zone": "answer_a", "label": "lonely"}]})
+    _, after_rows = await db.load_content()
     assert after_rows == before_rows
 
 
-def test_zone_validation_applies_when_zone_ids_given(db):
+@pytest.mark.asyncio
+async def test_zone_validation_applies_when_zone_ids_given(db):
     # q2 is a "choice" round (no zone_layout), so its zones must exist in
     # TrackingBox's map; layout rounds like q1 use logical per-question zones.
-    before = db.load_content()
+    before = await db.load_content()
     with pytest.raises(ContentError):
-        update_round(
+        await update_round(
             db,
             "q2",
             {"options": [{"zone": "nope", "label": "X"}, {"zone": "answer_b", "label": "Y"}]},
             valid_zone_ids={"answer_a", "answer_b"},
         )
-    assert db.load_content() == before
+    assert await db.load_content() == before
 
 
-def test_unknown_round_and_uneditable_field_rejected(db):
+@pytest.mark.asyncio
+async def test_unknown_round_and_uneditable_field_rejected(db):
     with pytest.raises(ContentError, match="unknown round"):
-        update_round(db, "ghost", {"question": "?"})
+        await update_round(db, "ghost", {"question": "?"})
     with pytest.raises(ContentError, match="not editable"):
-        update_round(db, "q1", {"id": "q2"})
+        await update_round(db, "q1", {"id": "q2"})

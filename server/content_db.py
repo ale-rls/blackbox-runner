@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Optional
 
 from .content import ShowContent, validate_show
-from .persistence import ContentRoundRow, Database
+from .pocketbase_client import ContentRoundRow, PocketBaseClient
 
 
 def row_to_raw(row: ContentRoundRow) -> dict:
@@ -66,10 +66,12 @@ def rows_from_raw(rounds: list[dict]) -> list[ContentRoundRow]:
     return [raw_to_row(i, r) for i, r in enumerate(rounds)]
 
 
-def load_show_db(db: Database, *, valid_zone_ids: Optional[set[str]] = None) -> ShowContent:
+async def load_show_db(
+    db: PocketBaseClient, *, valid_zone_ids: Optional[set[str]] = None
+) -> ShowContent:
     """Load and validate the show from the database. An empty content_rounds
-    table is a valid empty show (no rounds imported yet), not an error."""
-    version, rows = db.load_content()
+    collection is a valid empty show (no rounds imported yet), not an error."""
+    version, rows = await db.load_content()
     raw: dict = {"rounds": [row_to_raw(r) for r in rows]}
     if version:
         raw["version"] = version

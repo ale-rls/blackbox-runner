@@ -8,7 +8,6 @@ from server.bindings import BindingManager
 from server.content import ShowContent
 from server.engine import EngineError, GameEngine, RoundState
 from server.models import AudienceSummary
-from server.persistence import Database
 from server.tracking_client import ChangeEvent
 from server.tracking_client import TrackingClient
 
@@ -53,12 +52,8 @@ def _seed(tracking: TrackingClient, gid: int, zone: str | None) -> None:
 
 
 @pytest.fixture
-def db():
-    database = Database(":memory:")
-    try:
-        yield database
-    finally:
-        database.close()
+async def db(pb):
+    return pb
 
 
 @pytest.fixture
@@ -68,7 +63,7 @@ def tracking():
 
 @pytest.fixture
 async def bindings(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     return await BindingManager.load(db, session_id, tracking)
 
 
@@ -137,7 +132,7 @@ async def test_majority_scoring(engine, bindings, tracking):
 
 @pytest.mark.asyncio
 async def test_minority_scoring(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     bindings = await BindingManager.load(db, session_id, tracking)
     show = ShowContent.model_validate(SHOW)
     engine = GameEngine(db, session_id, show, bindings, tracking)
@@ -161,7 +156,7 @@ async def test_minority_scoring(db, tracking):
 
 @pytest.mark.asyncio
 async def test_correct_zone_scoring_ignores_majority(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     bindings = await BindingManager.load(db, session_id, tracking)
     show = ShowContent.model_validate(SHOW)
     engine = GameEngine(db, session_id, show, bindings, tracking)
@@ -217,7 +212,7 @@ async def test_lost_gid_at_close_is_absent_not_wrong(engine, bindings, tracking)
 
 @pytest.mark.asyncio
 async def test_auto_timer_closes_and_reveals(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     bindings = await BindingManager.load(db, session_id, tracking)
     fast_show = ShowContent.model_validate(
         {
@@ -247,7 +242,7 @@ async def test_auto_timer_closes_and_reveals(db, tracking):
 
 @pytest.mark.asyncio
 async def test_no_more_rounds_raises(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     bindings = await BindingManager.load(db, session_id, tracking)
     show = ShowContent.model_validate(
         {"version": "1", "rounds": [SHOW["rounds"][0]]}
@@ -323,7 +318,7 @@ async def test_zone_counts_broadcast_stops_after_close(engine, bindings, trackin
 
 @pytest.mark.asyncio
 async def test_load_with_no_rounds_starts_fresh(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     bindings = await BindingManager.load(db, session_id, tracking)
     show = ShowContent.model_validate(SHOW)
     engine = await GameEngine.load(db, session_id, show, bindings, tracking)
@@ -333,7 +328,7 @@ async def test_load_with_no_rounds_starts_fresh(db, tracking):
 
 @pytest.mark.asyncio
 async def test_load_resumes_after_a_fully_done_round(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     bindings = await BindingManager.load(db, session_id, tracking)
     show = ShowContent.model_validate(SHOW)
 
@@ -351,7 +346,7 @@ async def test_load_resumes_after_a_fully_done_round(db, tracking):
 
 @pytest.mark.asyncio
 async def test_load_recovers_mid_round_as_closing_with_answers_preserved(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     bindings = await BindingManager.load(db, session_id, tracking)
     show = ShowContent.model_validate(SHOW)
 
@@ -381,7 +376,7 @@ async def test_load_recovers_mid_round_as_closing_with_answers_preserved(db, tra
 
 @pytest.mark.asyncio
 async def test_load_does_not_repeat_a_recovered_round(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     bindings = await BindingManager.load(db, session_id, tracking)
     show = ShowContent.model_validate(SHOW)
 
@@ -475,7 +470,7 @@ NARRATION_SHOW = {
 
 @pytest.mark.asyncio
 async def test_narration_round_payload_carries_text_and_audio(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     bindings = await BindingManager.load(db, session_id, tracking)
     engine = GameEngine(db, session_id, ShowContent.model_validate(NARRATION_SHOW), bindings, tracking)
 
@@ -491,7 +486,7 @@ async def test_narration_round_payload_carries_text_and_audio(db, tracking):
 
 @pytest.mark.asyncio
 async def test_narration_round_has_no_auto_close_timer(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     bindings = await BindingManager.load(db, session_id, tracking)
     engine = GameEngine(db, session_id, ShowContent.model_validate(NARRATION_SHOW), bindings, tracking)
 
@@ -502,7 +497,7 @@ async def test_narration_round_has_no_auto_close_timer(db, tracking):
 
 @pytest.mark.asyncio
 async def test_narration_reveal_records_no_answers_or_scores(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     bindings = await BindingManager.load(db, session_id, tracking)
     engine = GameEngine(db, session_id, ShowContent.model_validate(NARRATION_SHOW), bindings, tracking)
     await _claim_bound(bindings, tracking, "p1", 1, "a")
@@ -511,13 +506,13 @@ async def test_narration_reveal_records_no_answers_or_scores(db, tracking):
     await engine.reveal_round()  # operator "finish step" straight from active
     assert rt.state == RoundState.DONE
     assert rt.answers == {}
-    assert db.load_answers(rt.row_id) == []
-    assert db.load_score_events(session_id) == []
+    assert await db.load_answers(rt.row_id) == []
+    assert await db.load_score_events(session_id) == []
 
 
 @pytest.mark.asyncio
 async def test_question_round_payload_carries_form_metadata(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     bindings = await BindingManager.load(db, session_id, tracking)
     engine = GameEngine(db, session_id, ShowContent.model_validate(NARRATION_SHOW), bindings, tracking)
 
@@ -568,7 +563,7 @@ def _seed_floor(tracking: TrackingClient, gid: int, x: float, y: float, valid: b
 
 @pytest.mark.asyncio
 async def test_layout_round_resolves_answers_from_floor_positions(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     bindings = await BindingManager.load(db, session_id, tracking)
     engine = GameEngine(
         db, session_id, ShowContent.model_validate(RINGS_SHOW), bindings, tracking,
@@ -594,7 +589,7 @@ async def test_layout_round_resolves_answers_from_floor_positions(db, tracking):
 
 @pytest.mark.asyncio
 async def test_layout_round_marks_invalid_floor_absent(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     bindings = await BindingManager.load(db, session_id, tracking)
     engine = GameEngine(
         db, session_id, ShowContent.model_validate(RINGS_SHOW), bindings, tracking,

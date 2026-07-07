@@ -18,7 +18,7 @@ rounds:
     audio: k2_intro.mp3
     text: |
       Hallo, herzlich willkommen.
-      Schön, dass du dich für die “KI-Blackbox” entschieden hast. 
+      SchÃ¶n, dass du dich fÃ¼r die â€œKI-Blackboxâ€ entschieden hast. 
       Heute Abend entwickeln wir gemeinsam ein neues Mensch-Maschine-System.
       Kein fertiges Produkt.
       Kein Prototyp aus einem Forschungslabor.
@@ -27,25 +27,25 @@ rounds:
       Es beginnt genau jetzt.
       Mit dir. 
       Vielleicht fragst du dich, warum ausgerechnet Menschen ein KI-Modell bauen sollten.
-      Die meisten Systeme, die unseren Alltag prägen, entstehen hinter verschlossenen Türen. In Rechenzentren. In Forschungslaboren. In Unternehmen mit enormen Ressourcen. Ihre Funktionsweise bleibt oft verborgen. Ihre Entscheidungen erscheinen objektiv, obwohl sie auf zahllosen Annahmen beruhen.
+      Die meisten Systeme, die unseren Alltag prÃ¤gen, entstehen hinter verschlossenen TÃ¼ren. In Rechenzentren. In Forschungslaboren. In Unternehmen mit enormen Ressourcen. Ihre Funktionsweise bleibt oft verborgen. Ihre Entscheidungen erscheinen objektiv, obwohl sie auf zahllosen Annahmen beruhen.
       Heute Abend drehen wir diese Logik um.
-      Wir öffnen die Blackbox.
+      Wir Ã¶ffnen die Blackbox.
       Oder zumindest versuchen wir es.
-      Dafür brauchen wir keine Milliarden Parameter.
+      DafÃ¼r brauchen wir keine Milliarden Parameter.
       Wir brauchen euch.
-      Eure Körper.
+      Eure KÃ¶rper.
       Eure Entscheidungen.
       Eure Bewegungen.
       Eure Aufmerksamkeit.
-      In den nächsten Minuten wird aus einer Gruppe von Besucher:innen langsam ein gemeinsames Modell entstehen.
+      In den nÃ¤chsten Minuten wird aus einer Gruppe von Besucher:innen langsam ein gemeinsames Modell entstehen.
       Ein hybrides Modell.
-      Nicht ausschließlich menschlich.
-      Nicht ausschließlich künstlich.
-      Eine Zusammenarbeit zwischen natürlicher und künstlicher Intelligenz.
+      Nicht ausschlieÃŸlich menschlich.
+      Nicht ausschlieÃŸlich kÃ¼nstlich.
+      Eine Zusammenarbeit zwischen natÃ¼rlicher und kÃ¼nstlicher Intelligenz.
       Zwischen Wahrnehmung und Berechnung.
       Zwischen Theater und Algorithmus.
       Im Verlauf des Abends werden unterschiedliche Systeme miteinander arbeiten.
-      Große Sprachmodelle.
+      GroÃŸe Sprachmodelle.
       Computer Vision.
       Programme, die Muster erkennen.
       Programme, die Sprache erzeugen.
@@ -53,8 +53,8 @@ rounds:
       Nicht als Publikum, sondern als lebendige Bestandteile dieses Systems.
       Jede Bewegung kann Bedeutung bekommen.
       Jede Position kann zu Information werden.
-      Jede Entscheidung kann eine Berechnung verändern.
-      Vielleicht werden wir später verstehen, wie dieses Modell funktioniert.
+      Jede Entscheidung kann eine Berechnung verÃ¤ndern.
+      Vielleicht werden wir spÃ¤ter verstehen, wie dieses Modell funktioniert.
       Vielleicht auch nicht.
       Denn jede Blackbox bleibt in gewisser Weise eine Blackbox.
       Auch diese hier.
@@ -64,11 +64,11 @@ rounds:
       Noch seid ihr einfach hier.
       Gleich beginnt das Modell von euch zu lernen.
       Und vielleicht beginnt gleichzeitig etwas anderes.
-      Nicht nur die Maschine verändert sich.
-      Vielleicht verändert sich auch eure Vorstellung davon, was eine Maschine überhaupt ist.
+      Nicht nur die Maschine verÃ¤ndert sich.
+      Vielleicht verÃ¤ndert sich auch eure Vorstellung davon, was eine Maschine Ã¼berhaupt ist.
       Lasst uns beginnen. 
 
-      Das Training eines KI-Modells gliedert sich in Epochen. Wir beginnen mit der Trainingsepoche “Arbeit”. Erinnere dich an deine bisherige Arbeit. Deine Arbeit  in der Welt außerhalb unserer Blackbox. 
+      Das Training eines KI-Modells gliedert sich in Epochen. Wir beginnen mit der Trainingsepoche â€œArbeitâ€. Erinnere dich an deine bisherige Arbeit. Deine Arbeit  in der Welt auÃŸerhalb unserer Blackbox. 
 
   # ---------------------------------------------------------------- #
   # K3 â€” Trainingsstrecke: Arbeit
@@ -80,16 +80,16 @@ rounds:
     grace_s: 0
     points: 0
     text: |
-      Auf dem Boden siehst du verschiedenfarbige Markierungen. Positioniere dich auf ihnen entsprechend der Fragen, die du gleich gestellt bekommst. Es gibt drei verschiedene Arten von Markierungen. Für sie gelten unterschiedliche Regeln:
+      Auf dem Boden siehst du verschiedenfarbige Markierungen. Positioniere dich auf ihnen entsprechend der Fragen, die du gleich gestellt bekommst. Es gibt drei verschiedene Arten von Markierungen. FÃ¼r sie gelten unterschiedliche Regeln:
       Bei der rosa Linie gilt: Ordne dich auf ihr zwischen zwei verschiedenen Polen ein. Wie auf einer einfachen Skala 
-      Für die rosa und die grüne Markierung zusammen gilt: Ordne dich auf dem Feld ein, das die beiden Achsen zusammen ergeben. Was sie bedeuten, musst du dabei gleichzeitig berücksichtigen.
-      Bei den blauen Kreisringen gilt: Die Mitte steht für maximale Zustimmung. Je weiter du von dich von der Mitte entfernst, desto geringer ist deine Zustimmung. Wenn du einer Aussage überhaupt nicht zustimmst, bewege dich an den Rand der Kreisringe.
+      FÃ¼r die rosa und die grÃ¼ne Markierung zusammen gilt: Ordne dich auf dem Feld ein, das die beiden Achsen zusammen ergeben. Was sie bedeuten, musst du dabei gleichzeitig berÃ¼cksichtigen.
+      Bei den blauen Kreisringen gilt: Die Mitte steht fÃ¼r maximale Zustimmung. Je weiter du von dich von der Mitte entfernst, desto geringer ist deine Zustimmung. Wenn du einer Aussage Ã¼berhaupt nicht zustimmst, bewege dich an den Rand der Kreisringe.
       Bitte stellt euch zu Beginn so auf, dass ihr den Vorhang vor euch habt.
       Lasst uns beginnen. 
 
     audio: k3_intro.mp3
   - id: arbeit_1
-    question: "Wie fühlt sich deine bisherige Arbeit für dich an?"
+    question: "Wie fÃ¼hlt sich deine bisherige Arbeit fÃ¼r dich an?"
     type: majority
     duration_s: 45
     grace_s: 5
@@ -100,8 +100,8 @@ rounds:
       right: Diese Arbeit ist nicht auszuhalten
     audio: arbeit_1.mp3
     text: |
-      Wie fühlt sich deine bisherige Arbeit für dich an?
-      Positioniere dich auf der rosa Skala zwischen links “Ich liebe diese Arbeit” und rechts “Diese Arbeit ist nicht auszuhalten”.
+      Wie fÃ¼hlt sich deine bisherige Arbeit fÃ¼r dich an?
+      Positioniere dich auf der rosa Skala zwischen links â€œIch liebe diese Arbeitâ€ und rechts â€œDiese Arbeit ist nicht auszuhaltenâ€.
     options:
       - zone: scale_left
         label: Ich liebe diese Arbeit
@@ -113,7 +113,7 @@ rounds:
         label: Diese Arbeit ist nicht auszuhalten
         correct: false
   - id: arbeit_2
-    question: "Wie sinnvoll ist deine bisherige Arbeit für dich selbst und wie sinnvoll ist sie für andere?"
+    question: "Wie sinnvoll ist deine bisherige Arbeit fÃ¼r dich selbst und wie sinnvoll ist sie fÃ¼r andere?"
     type: majority
     duration_s: 45
     grace_s: 5
@@ -125,9 +125,9 @@ rounds:
       y_top: sehr sinnvoll fÃ¼r mich
       y_bottom: wenig sinnvoll fÃ¼r mich
     text: |
-      Wie sinnvoll ist deine bisherige Arbeit für dich selbst und wie sinnvoll ist sie für andere?
-      Positioniere dich im Feld zwischen den beiden Achsen. Die grüne Achse zeigt, wie sinnvoll deine bisherige Arbeit für dich selbst ist. Von “wenig sinnvoll für mich” unten bis “sehr sinnvoll für mich” oben. Die rosa Achse zeigt, wie sinnvoll sie für andere ist. Von “wenig sinnvoll für andere” links bis “sehr sinnvoll für andere” rechts. 
-      Berücksichtige beide Achsen gleichzeitig und wähle die Position, die deiner Einschätzung am besten entspricht.
+      Wie sinnvoll ist deine bisherige Arbeit fÃ¼r dich selbst und wie sinnvoll ist sie fÃ¼r andere?
+      Positioniere dich im Feld zwischen den beiden Achsen. Die grÃ¼ne Achse zeigt, wie sinnvoll deine bisherige Arbeit fÃ¼r dich selbst ist. Von â€œwenig sinnvoll fÃ¼r michâ€ unten bis â€œsehr sinnvoll fÃ¼r michâ€ oben. Die rosa Achse zeigt, wie sinnvoll sie fÃ¼r andere ist. Von â€œwenig sinnvoll fÃ¼r andereâ€ links bis â€œsehr sinnvoll fÃ¼r andereâ€ rechts. 
+      BerÃ¼cksichtige beide Achsen gleichzeitig und wÃ¤hle die Position, die deiner EinschÃ¤tzung am besten entspricht.
     options:
       - zone: cross_tl
         label: sinnvoll fÃ¼r mich, wenig fÃ¼r andere
@@ -153,8 +153,8 @@ rounds:
       left: Ich empfange Befehle
       right: Ich entscheide selbst
     text: |-
-      Wie angemessen wurdest du für deine bisherige Arbeit bezahlt?
-      Positioniere dich auf der rosa Skala zwischen links „viel zu wenig“ und rechts „überbezahlt“. Die Mitte der Skala bedeutet „angemessen bezahlt“.
+      Wie angemessen wurdest du fÃ¼r deine bisherige Arbeit bezahlt?
+      Positioniere dich auf der rosa Skala zwischen links â€viel zu wenigâ€œ und rechts â€Ã¼berbezahltâ€œ. Die Mitte der Skala bedeutet â€angemessen bezahltâ€œ.
     options:
       - zone: scale_left
         label: Ich empfange Befehle
@@ -167,7 +167,7 @@ rounds:
         correct: false
     audio: arbeit_3.mp3
   - id: arbeit_4
-    question: "Wie angemessen wurdest du für deine bisherige Arbeit bezahlt?"
+    question: "Wie angemessen wurdest du fÃ¼r deine bisherige Arbeit bezahlt?"
     type: majority
     duration_s: 45
     grace_s: 5
@@ -178,8 +178,8 @@ rounds:
       middle: angemessen
       right: Ã¼berbezahlt
     text: |-
-      Wie angemessen wurdest du für deine bisherige Arbeit bezahlt?
-      Positioniere dich auf der rosa Skala zwischen links „viel zu wenig“ und rechts „überbezahlt“. Die Mitte der Skala bedeutet „angemessen bezahlt“.
+      Wie angemessen wurdest du fÃ¼r deine bisherige Arbeit bezahlt?
+      Positioniere dich auf der rosa Skala zwischen links â€viel zu wenigâ€œ und rechts â€Ã¼berbezahltâ€œ. Die Mitte der Skala bedeutet â€angemessen bezahltâ€œ.
     options:
       - zone: scale_left
         label: viel zu wenig
@@ -192,7 +192,7 @@ rounds:
         correct: false
     audio: arbeit_4.mp3
   - id: arbeit_5
-    question: "Wie groß ist deine Sorge, in deiner Arbeit durch andere Menschen ersetzt zu werden?"
+    question: "Wie groÃŸ ist deine Sorge, in deiner Arbeit durch andere Menschen ersetzt zu werden?"
     type: majority
     duration_s: 45
     grace_s: 5
@@ -203,8 +203,8 @@ rounds:
       middle: Ich bin stehengeblieben
       right: Ich bin sehr stark gewachsen
     text: |-
-      Wie groß ist deine Sorge, in deiner Arbeit durch andere Menschen ersetzt zu werden?
-      Positioniere dich auf der rosa Skala zwischen links “keine Sorge” und rechts “sehr große Sorge”.
+      Wie groÃŸ ist deine Sorge, in deiner Arbeit durch andere Menschen ersetzt zu werden?
+      Positioniere dich auf der rosa Skala zwischen links â€œkeine Sorgeâ€ und rechts â€œsehr groÃŸe Sorgeâ€.
     options:
       - zone: scale_left
         label: Ich bin eher geschrumpft
@@ -217,7 +217,7 @@ rounds:
         correct: false
     audio: arbeit_5.mp3
   - id: arbeit_6
-    question: "Wie verbunden fühlst du dich mit den Menschen, mit denen du bisher gearbeitet hast?"
+    question: "Wie verbunden fÃ¼hlst du dich mit den Menschen, mit denen du bisher gearbeitet hast?"
     type: majority
     duration_s: 45
     grace_s: 5
@@ -227,9 +227,9 @@ rounds:
       center: sehr verbunden
       edge: sehr isoliert
     text: |
-      Wie verbunden fühlst du dich mit den Menschen, mit denen du bisher gearbeitet hast?
-      Stelle dich näher zur Mitte der blauen Kreisringe, je mehr du dich sehr verbunden fühlst.
-      Stelle dich weiter nach außen, wenn du dich sehr isoliert fühlst.
+      Wie verbunden fÃ¼hlst du dich mit den Menschen, mit denen du bisher gearbeitet hast?
+      Stelle dich nÃ¤her zur Mitte der blauen Kreisringe, je mehr du dich sehr verbunden fÃ¼hlst.
+      Stelle dich weiter nach auÃŸen, wenn du dich sehr isoliert fÃ¼hlst.
     options:
       - zone: ring_center
         label: sehr verbunden
@@ -264,7 +264,7 @@ rounds:
 
     audio: arbeit_7.mp3
   - id: arbeit_8
-    question: "Wie groß ist deine Sorge, in deiner Arbeit durch Maschinen oder KI-Systeme ersetzt zu werden?"
+    question: "Wie groÃŸ ist deine Sorge, in deiner Arbeit durch Maschinen oder KI-Systeme ersetzt zu werden?"
     type: majority
     duration_s: 45
     grace_s: 5
@@ -274,8 +274,8 @@ rounds:
       left: keine Sorge
       right: sehr groÃŸe Sorge
     text: |-
-      Wie groß ist deine Sorge, in deiner Arbeit durch Maschinen oder KI-Systeme ersetzt zu werden?
-      Positioniere dich auf der rosa Skala zwischen links “keine Sorge” und rechts “sehr große Sorge”.
+      Wie groÃŸ ist deine Sorge, in deiner Arbeit durch Maschinen oder KI-Systeme ersetzt zu werden?
+      Positioniere dich auf der rosa Skala zwischen links â€œkeine Sorgeâ€ und rechts â€œsehr groÃŸe Sorgeâ€.
     options:
       - zone: scale_left
         label: keine Sorge
@@ -294,13 +294,13 @@ rounds:
     grace_s: 0
     points: 0
     text: |
-      Das Modell hat eure bisherigen Arbeitsverhältnisse gelesen.
+      Das Modell hat eure bisherigen ArbeitsverhÃ¤ltnisse gelesen.
 
       Eure Positionen im Raum. Daraus entstehen erste Muster.
       Das Modell erkennt:
-       Arbeit ist nicht nur Tätigkeit.
+       Arbeit ist nicht nur TÃ¤tigkeit.
        Arbeit ist ein Koordinatensystem.
-      Nähe.
+      NÃ¤he.
       Druck.
       Sinn.
       Bezahlung.
@@ -313,19 +313,19 @@ rounds:
   # ---------------------------------------------------------------- #
     audio: k3_1_abschluss.mp3
   - id: k4_intro
-    question: "Trainingsepoche: Mensch–Maschine"
+    question: "Trainingsepoche: Menschâ€“Maschine"
     type: narration
     duration_s: 0
     grace_s: 0
     points: 0
     text: |
-      Wir beginnen die nächste Trainingsepoche, Thema “Mensch-Maschine”:
-      Bevor es losgeht, kehrt bitte in die Ausgangsposition zurück. Stellt euch so auf, dass ihr den Vorhang vor euch habt.
+      Wir beginnen die nÃ¤chste Trainingsepoche, Thema â€œMensch-Maschineâ€:
+      Bevor es losgeht, kehrt bitte in die Ausgangsposition zurÃ¼ck. Stellt euch so auf, dass ihr den Vorhang vor euch habt.
       Lasst uns beginnen.
 
     audio: k4_intro.mp3
   - id: mensch_maschine_1
-    question: "Wie lange könntest du im Alltag deine Verbindung zum Netz trennen, ohne Angst zu haben, etwas Wichtiges zu verpassen?"
+    question: "Wie lange kÃ¶nntest du im Alltag deine Verbindung zum Netz trennen, ohne Angst zu haben, etwas Wichtiges zu verpassen?"
     type: majority
     duration_s: 45
     grace_s: 5
@@ -335,8 +335,8 @@ rounds:
       left: keine 10 Minuten
       right: wochenlang
     text: |
-      Wie lange könntest du im Alltag deine Verbindung zum Netz trennen, ohne Angst zu haben, etwas Wichtiges zu verpassen?
-      Positioniere dich auf der rosa Skala zwischen links “keine 10 Minuten” und rechts “wochenlang”.
+      Wie lange kÃ¶nntest du im Alltag deine Verbindung zum Netz trennen, ohne Angst zu haben, etwas Wichtiges zu verpassen?
+      Positioniere dich auf der rosa Skala zwischen links â€œkeine 10 Minutenâ€ und rechts â€œwochenlangâ€.
     options:
       - zone: scale_left
         label: keine 10 Minuten
@@ -349,7 +349,7 @@ rounds:
         correct: false
     audio: mensch_maschine_1.mp3
   - id: mensch_maschine_2
-    question: "Wer weiß mehr über dich?"
+    question: "Wer weiÃŸ mehr Ã¼ber dich?"
     type: majority
     duration_s: 45
     grace_s: 5
@@ -359,8 +359,8 @@ rounds:
       left: meine Freund:innen
       right: mein Smartphone
     text: |
-      Wer weiß mehr über dich: deine Freund:innen oder dein Smartphone?
-      Positioniere dich auf der rosa Skala zwischen links “meine Freund:innen” und rechts “mein Smartphone”.
+      Wer weiÃŸ mehr Ã¼ber dich: deine Freund:innen oder dein Smartphone?
+      Positioniere dich auf der rosa Skala zwischen links â€œmeine Freund:innenâ€ und rechts â€œmein Smartphoneâ€.
     options:
       - zone: scale_left
         label: meine Freund:innen
@@ -373,15 +373,15 @@ rounds:
         correct: false
     audio: mensch_maschine_2.mp3
   - id: mensch_maschine_3
-    question: "Was von dir würdest du niemals mit einer Maschine teilen?"
+    question: "Was von dir wÃ¼rdest du niemals mit einer Maschine teilen?"
     type: majority
     duration_s: 45
     grace_s: 5
     points: 0
     form: quadrants
     text: |-
-      Was von dir würdest du niemals mit einer Maschine teilen?
-      Positioniere dich in einem der vier Felder, die die rosa und grünen Linien zusammen bilden. Das Feld oben links bedeutet“ mein Körper”, das Feld oben rechts “meine Gedanken”. Das Feld unten links bedeutet “meine Beziehungen”, das Feld unten rechts “nichts ist unantastbar”.
+      Was von dir wÃ¼rdest du niemals mit einer Maschine teilen?
+      Positioniere dich in einem der vier Felder, die die rosa und grÃ¼nen Linien zusammen bilden. Das Feld oben links bedeutetâ€œ mein KÃ¶rperâ€, das Feld oben rechts â€œmeine Gedankenâ€. Das Feld unten links bedeutet â€œmeine Beziehungenâ€, das Feld unten rechts â€œnichts ist unantastbarâ€.
     options:
       - zone: cross_tl
         label: mein KÃ¶rper
@@ -408,8 +408,8 @@ rounds:
       edge: sehr wichtig
     text: |
       Wie wichtig ist es dir, dass es Bereiche deines Lebens gibt, die kein digitales System kennen kann?
-      Stelle dich näher zur Mitte der blauen Kreisringe, wenn es dir überhaupt nicht wichtig ist.
-      Stelle dich weiter nach außen, wenn es dir sehr wichtig ist.
+      Stelle dich nÃ¤her zur Mitte der blauen Kreisringe, wenn es dir Ã¼berhaupt nicht wichtig ist.
+      Stelle dich weiter nach auÃŸen, wenn es dir sehr wichtig ist.
     options:
       - zone: ring_center
         label: Ã¼berhaupt nicht wichtig
@@ -435,8 +435,8 @@ rounds:
       y_bottom: die Maschinen fÃ¼hren
     text: |
       Wie werden Menschen und Maschinen in zwanzig Jahren zusammenleben?
-      Positioniere dich im Feld zwischen den beiden Achsen. Die grüne Achse zeigt an, wer in der Zukunft führt. Von “die Maschinen führen” unten bis “die Menschen führen” oben. Die rosa Achse zeigt den Grad des Zusammenseins an. Von “getrennt” links bis “verschmolzen” rechts. 
-      Berücksichtige beide Achsen gleichzeitig und wähle die Position, die deiner Einschätzung am besten entspricht.
+      Positioniere dich im Feld zwischen den beiden Achsen. Die grÃ¼ne Achse zeigt an, wer in der Zukunft fÃ¼hrt. Von â€œdie Maschinen fÃ¼hrenâ€ unten bis â€œdie Menschen fÃ¼hrenâ€ oben. Die rosa Achse zeigt den Grad des Zusammenseins an. Von â€œgetrenntâ€ links bis â€œverschmolzenâ€ rechts. 
+      BerÃ¼cksichtige beide Achsen gleichzeitig und wÃ¤hle die Position, die deiner EinschÃ¤tzung am besten entspricht.
     options:
       - zone: cross_tl
         label: Menschen fÃ¼hren, getrennt
@@ -452,7 +452,7 @@ rounds:
         correct: false
     audio: mensch_maschine_5.mp3
   - id: mensch_maschine_6
-    question: "Wie möchtest du selbst in Zukunft mit Maschinen zusammenleben?"
+    question: "Wie mÃ¶chtest du selbst in Zukunft mit Maschinen zusammenleben?"
     type: majority
     duration_s: 45
     grace_s: 5
@@ -464,8 +464,8 @@ rounds:
       y_top: ich fÃ¼hre
       y_bottom: die Maschine fÃ¼hrt
     text: |-
-      Wie möchtest du selbst in Zukunft mit Maschinen zusammenleben?
-      Positioniere dich im Feld zwischen den beiden Achsen. Die grüne Achse zeigt an, wer für dich in der Zukunft führt. Von “die Maschine führt” unten bis “ich führe” oben. Die rosa Achse zeigt den Grad des Zusammenseins an. Von “getrennt” links bis “verschmolzen” rechts. 
+      Wie mÃ¶chtest du selbst in Zukunft mit Maschinen zusammenleben?
+      Positioniere dich im Feld zwischen den beiden Achsen. Die grÃ¼ne Achse zeigt an, wer fÃ¼r dich in der Zukunft fÃ¼hrt. Von â€œdie Maschine fÃ¼hrtâ€ unten bis â€œich fÃ¼hreâ€ oben. Die rosa Achse zeigt den Grad des Zusammenseins an. Von â€œgetrenntâ€ links bis â€œverschmolzenâ€ rechts. 
     options:
       - zone: cross_tl
         label: ich fÃ¼hre, getrennt
@@ -481,7 +481,7 @@ rounds:
         correct: false
     audio: mensch_maschine_6.mp3
   - id: mensch_maschine_7
-    question: "Wie gut könntest du dein heutiges Leben ohne digitale und KI-basierte Systeme organisieren?"
+    question: "Wie gut kÃ¶nntest du dein heutiges Leben ohne digitale und KI-basierte Systeme organisieren?"
     type: majority
     duration_s: 45
     grace_s: 5
@@ -491,8 +491,8 @@ rounds:
       left: ohne Schwierigkeiten
       right: gar nicht mehr
     text: |-
-      Wie gut könntest du dein heutiges Leben ohne digitale und KI-basierte Systeme organisieren?
-      Positioniere dich auf der rosa Skala zwischen links “ohne Schwierigkeiten” und rechts “gar nicht mehr”.
+      Wie gut kÃ¶nntest du dein heutiges Leben ohne digitale und KI-basierte Systeme organisieren?
+      Positioniere dich auf der rosa Skala zwischen links â€œohne Schwierigkeitenâ€ und rechts â€œgar nicht mehrâ€.
     options:
       - zone: scale_left
         label: ohne Schwierigkeiten
@@ -505,7 +505,7 @@ rounds:
         correct: false
     audio: mensch_maschine_7.mp3
   - id: mensch_maschine_8
-    question: "Wie weit möchtest du dich digitalen und KI-basierten Systemen entziehen?"
+    question: "Wie weit mÃ¶chtest du dich digitalen und KI-basierten Systemen entziehen?"
     type: majority
     duration_s: 45
     grace_s: 5
@@ -515,8 +515,8 @@ rounds:
       left: Ich mÃ¶chte mich komplett entziehen
       right: Ich mÃ¶chte mit ihnen verschmelzen
     text: |-
-      Wie weit möchtest du dich digitalen und KI-basierten Systemen entziehen?
-      Positioniere dich auf der rosa Skala zwischen links “Ich möchte mich komplett entziehen” und rechts “ich möchte mit ihnen verschmelzen”
+      Wie weit mÃ¶chtest du dich digitalen und KI-basierten Systemen entziehen?
+      Positioniere dich auf der rosa Skala zwischen links â€œIch mÃ¶chte mich komplett entziehenâ€ und rechts â€œich mÃ¶chte mit ihnen verschmelzenâ€
     options:
       - zone: scale_left
         label: Ich mÃ¶chte mich komplett entziehen

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -27,7 +28,7 @@ from .config import Settings
 from .content import ContentError, ShowContent
 from .engine import EngineError, GameEngine
 from .models import ZoneMap
-from .persistence import Database
+from .pocketbase_client import PocketBaseClient
 from .tracking_client import TrackingClient, fetch_zones
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -36,6 +37,7 @@ log = logging.getLogger("blackbox_runner.app")
 
 _POSITION_LOG_INTERVAL_S = 5.0
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+_PLAYER_BUILD = Path(__file__).resolve().parent.parent / "frontend" / "player" / "build"
 
 
 async def _log_positions_periodically(client: TrackingClient) -> None:
@@ -105,10 +107,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         reconnect_max_s=settings.reconnect_max_s,
         history_seconds=settings.position_history_seconds,
     )
-    db = Database(settings.db_path)
+    if not settings.pocketbase_admin_email or not settings.pocketbase_admin_password:
+        raise RuntimeError(
+            "PocketBase credentials missing — set POCKETBASE_ADMIN_EMAIL and "
+            "POCKETBASE_ADMIN_PASSWORD (see .env.example). The game server "
+            "cannot run without its persistence backend."
+        )
+    db = PocketBaseClient(
+        settings.pocketbase_url,
+        settings.pocketbase_admin_email,
+        settings.pocketbase_admin_password,
+    )
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
+        # Persistence first, and hard-fail: unlike tracking there is no
+        # degraded mode without it — no session, no crash recovery, nothing.
+        await db.connect()
+
         tracking_task = asyncio.create_task(tracking.run())
         try:
             await tracking.wait_connected(timeout=10)
@@ -120,12 +136,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             log.warning("Could not fetch zones from TrackingBox: %s", exc)
             app.state.zones = ZoneMap(enabled=False, default_zone=None, zones=[])
 
-        session_id = await asyncio.to_thread(db.get_active_session_id)
+        session_id = await db.get_active_session_id()
         if session_id is None:
-            session_id = await asyncio.to_thread(db.create_session)
-            log.info("Started new session %d", session_id)
+            session_id = await db.create_session()
+            log.info("Started new session %s", session_id)
         else:
-            log.info("Resuming session %d (crash recovery)", session_id)
+            log.info("Resuming session %s (crash recovery)", session_id)
         bindings = await BindingManager.load(
             db,
             session_id,
@@ -139,8 +155,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.session_id = session_id
 
         try:
-            show = await asyncio.to_thread(
-                content_db.load_show_db, db, valid_zone_ids=app.state.zones.zone_ids()
+            show = await content_db.load_show_db(
+                db, valid_zone_ids=app.state.zones.zone_ids()
             )
             log.info("Loaded show content: %d round(s) from database", len(show.rounds))
         except ContentError as exc:
@@ -164,9 +180,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-            await asyncio.to_thread(db.close)
+            await db.close()
 
     app = FastAPI(title="Blackbox Runner", version="0.1.0", lifespan=lifespan)
+    # Permissive CORS so a standalone-deployed player frontend (SvelteKit
+    # static build with VITE_GAME_URL, docs in frontend/player) can call the
+    # API cross-origin. Consistent with the existing trust model: the admin
+    # API has no auth and the server lives on a venue LAN / private network.
+    app.add_middleware(
+        CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+    )
     app.state.settings = settings
     app.state.tracking = tracking
     app.state.db = db
@@ -265,8 +288,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         isn't safe to use).
         """
         try:
-            show = await asyncio.to_thread(
-                content_db.load_show_db, db, valid_zone_ids=app.state.zones.zone_ids()
+            show = await content_db.load_show_db(
+                db, valid_zone_ids=app.state.zones.zone_ids()
             )
         except ContentError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -304,7 +327,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/admin/content")
     async def get_content() -> dict:
         try:
-            show = await asyncio.to_thread(content_db.load_show_db, db)
+            show = await content_db.load_show_db(db)
         except ContentError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         audio_dir = Path(settings.audio_dir)
@@ -327,12 +350,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.put("/api/admin/content/rounds/{round_id}")
     async def update_round(round_id: str, fields: dict) -> dict:
         try:
-            show = await asyncio.to_thread(
-                show_store.update_round,
+            show = await show_store.update_round(
                 db,
                 round_id,
                 fields,
                 valid_zone_ids=_edit_zone_ids(),
+                audio_dir=settings.audio_dir,
             )
         except ContentError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -347,12 +370,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not isinstance(new_round, dict):
             raise HTTPException(status_code=400, detail="body must include a 'round' object")
         try:
-            show = await asyncio.to_thread(
-                show_store.create_round,
+            show = await show_store.create_round(
                 db,
                 new_round,
                 after_id=after_id,
                 valid_zone_ids=_edit_zone_ids(),
+                audio_dir=settings.audio_dir,
             )
         except ContentError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -363,11 +386,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.delete("/api/admin/content/rounds/{round_id}")
     async def delete_round(round_id: str) -> dict:
         try:
-            show = await asyncio.to_thread(
-                show_store.delete_round,
+            show = await show_store.delete_round(
                 db,
                 round_id,
                 valid_zone_ids=_edit_zone_ids(),
+                audio_dir=settings.audio_dir,
             )
         except ContentError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -384,7 +407,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Read fresh from the DB, not the running engine: an edit saved
         # mid-round (reloaded: false) must still be what gets narrated.
         try:
-            show = await asyncio.to_thread(content_db.load_show_db, db)
+            show = await content_db.load_show_db(db)
         except ContentError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         round_ = next((r for r in show.rounds if r.id == round_id), None)
@@ -412,12 +435,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         filename = f"{round_id}.mp3"
         await asyncio.to_thread((Path(settings.audio_dir) / filename).write_bytes, audio_bytes)
-        show = await asyncio.to_thread(
-            show_store.update_round,
+        show = await show_store.update_round(
             db,
             round_id,
             {"audio": filename},
             valid_zone_ids=_edit_zone_ids(),
+            audio_dir=settings.audio_dir,
         )
         reloaded, detail = _reload_engine(show)
         return {
@@ -520,9 +543,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # -------------------------------------------------------------- #
     # Web: player claim page + admin dashboard
     # -------------------------------------------------------------- #
+    @app.get("/api/config")
+    async def client_config() -> dict:
+        """Runtime config the browser needs — currently just where the
+        player frontend's PocketBase realtime subscriptions should point.
+        Public values only; never credentials."""
+        return {"pocketbase_url": settings.pocketbase_url}
+
+    # The SvelteKit build (frontend/player, issue #17) is a pure SPA:
+    # every route serves the same fallback index.html and resolves
+    # client-side. web/player/index.html stays as the archived fallback
+    # when no build exists (e.g. a fresh checkout without Node).
+    _spa_index = _PLAYER_BUILD / "index.html"
+
     @app.get("/p/{player_id}")
     async def player_page(player_id: str) -> FileResponse:
+        if _spa_index.is_file():
+            return FileResponse(_spa_index)
         return FileResponse(_WEB_DIR / "player" / "index.html")
+
+    if _spa_index.is_file():
+
+        @app.get("/")
+        async def player_entry() -> FileResponse:
+            """The one link to hand to every new audience member: the app
+            assigns them a sticky seat id and redirects to /p/{id}."""
+            return FileResponse(_spa_index)
+
+        # SvelteKit's hashed assets live under /_app.
+        app.mount(
+            "/_app",
+            StaticFiles(directory=_PLAYER_BUILD / "_app"),
+            name="player-assets",
+        )
 
     if (_WEB_DIR / "admin").is_dir():
         app.mount("/admin", StaticFiles(directory=_WEB_DIR / "admin", html=True), name="admin")

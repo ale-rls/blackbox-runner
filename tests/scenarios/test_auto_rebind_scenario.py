@@ -11,7 +11,6 @@ import pytest
 
 from server.bindings import BindingManager, PlayerState
 from server.models import AudienceSummary
-from server.persistence import Database
 from server.tracking_client import ChangeEvent, TrackingClient
 
 
@@ -20,10 +19,10 @@ def _seed(tracking: TrackingClient, gid: int, floor: tuple[float, float]) -> Non
 
 
 @pytest.mark.asyncio
-async def test_gid_drop_and_nearby_respawn_auto_rebinds():
-    db = Database(":memory:")
+async def test_gid_drop_and_nearby_respawn_auto_rebinds(pb):
+    db = pb
     tracking = TrackingClient("ws://unused")
-    session_id = db.create_session()
+    session_id = await db.create_session()
     manager = await BindingManager.load(
         db, session_id, tracking, rebind_max_distance=0.1, rebind_max_gap_s=5.0
     )
@@ -48,17 +47,16 @@ async def test_gid_drop_and_nearby_respawn_auto_rebinds():
         assert recovered.gid == 502
 
         # The audit trail records exactly what happened and why.
-        events = db.load_binding_events(session_id)
+        events = await db.load_binding_events(session_id)
         reasons = [e.reason for e in events]
         assert reasons == ["claim", "lost", "auto_rebind"]
         assert events[-1].old_gid is None
         assert events[-1].new_gid == 502
         assert events[-1].actor is None  # silent, not operator-driven
 
-        rows = db.load_players(session_id)
+        rows = await db.load_players(session_id)
         assert len(rows) == 1
         assert rows[0].gid == 502
         assert rows[0].state == "bound"
     finally:
         manager.shutdown()
-        db.close()

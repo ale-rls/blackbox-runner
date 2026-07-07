@@ -10,7 +10,6 @@ from asgi_lifespan import LifespanManager
 from server import content_db
 from server.app import create_app
 from server.config import Settings
-from server.persistence import Database
 
 
 # A minimal scoreable show against conftest's answer_a/answer_b zones, so app
@@ -27,30 +26,27 @@ _TEST_SHOW = (
 )
 
 
-def _import_show(db_path: str, yaml_text: str) -> None:
+async def _import_show(pb, yaml_text: str) -> None:
     """Push a YAML show into the game DB, as scripts/import_content.py does."""
     raw = yaml.safe_load(yaml_text)
-    db = Database(db_path)
-    try:
-        db.save_content(str(raw.get("version", "1")), content_db.rows_from_raw(raw["rounds"]))
-    finally:
-        db.close()
+    await pb.save_content(str(raw.get("version", "1")), content_db.rows_from_raw(raw["rounds"]))
 
 
-def _settings(fake_backend, fake_zones_http, tmp_path) -> Settings:
-    db_path = str(tmp_path / "game.db")
-    _import_show(db_path, _TEST_SHOW)
+def _settings(fake_backend, fake_zones_http, fake_pocketbase, tmp_path) -> Settings:
     return Settings(
         tracking_ws_url=fake_backend.ws_url,
         tracking_http_url=fake_zones_http,
-        db_path=db_path,
+        pocketbase_url=fake_pocketbase.url,
+        pocketbase_admin_email="test@example.com",
+        pocketbase_admin_password="test-password",
         audio_dir=str(tmp_path / "audio"),
     )
 
 
 @pytest.mark.asyncio
-async def test_health_and_zones_after_startup(fake_backend, fake_zones_http, tmp_path):
-    app = create_app(_settings(fake_backend, fake_zones_http, tmp_path))
+async def test_health_and_zones_after_startup(fake_backend, fake_zones_http, fake_pocketbase, pb, tmp_path):
+    await _import_show(pb, _TEST_SHOW)
+    app = create_app(_settings(fake_backend, fake_zones_http, fake_pocketbase, tmp_path))
 
     async with LifespanManager(app):
         transport = httpx.ASGITransport(app=app)
@@ -69,8 +65,9 @@ async def test_health_and_zones_after_startup(fake_backend, fake_zones_http, tmp
 
 
 @pytest.mark.asyncio
-async def test_claim_flow_and_admin_rebind(fake_backend, fake_zones_http, tmp_path):
-    app = create_app(_settings(fake_backend, fake_zones_http, tmp_path))
+async def test_claim_flow_and_admin_rebind(fake_backend, fake_zones_http, fake_pocketbase, pb, tmp_path):
+    await _import_show(pb, _TEST_SHOW)
+    app = create_app(_settings(fake_backend, fake_zones_http, fake_pocketbase, tmp_path))
 
     async with LifespanManager(app):
         transport = httpx.ASGITransport(app=app)
@@ -110,8 +107,9 @@ async def test_claim_flow_and_admin_rebind(fake_backend, fake_zones_http, tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_round_lifecycle_via_admin_endpoints(fake_backend, fake_zones_http, tmp_path):
-    app = create_app(_settings(fake_backend, fake_zones_http, tmp_path))
+async def test_round_lifecycle_via_admin_endpoints(fake_backend, fake_zones_http, fake_pocketbase, pb, tmp_path):
+    await _import_show(pb, _TEST_SHOW)
+    app = create_app(_settings(fake_backend, fake_zones_http, fake_pocketbase, tmp_path))
 
     async with LifespanManager(app):
         transport = httpx.ASGITransport(app=app)
@@ -154,8 +152,9 @@ async def test_round_lifecycle_via_admin_endpoints(fake_backend, fake_zones_http
 
 
 @pytest.mark.asyncio
-async def test_admin_fire_cue_reaches_td_subscribers(fake_backend, fake_zones_http, tmp_path):
-    app = create_app(_settings(fake_backend, fake_zones_http, tmp_path))
+async def test_admin_fire_cue_reaches_td_subscribers(fake_backend, fake_zones_http, fake_pocketbase, pb, tmp_path):
+    await _import_show(pb, _TEST_SHOW)
+    app = create_app(_settings(fake_backend, fake_zones_http, fake_pocketbase, tmp_path))
 
     async with LifespanManager(app):
         transport = httpx.ASGITransport(app=app)
@@ -187,10 +186,9 @@ async def test_admin_fire_cue_reaches_td_subscribers(fake_backend, fake_zones_ht
 
 
 @pytest.mark.asyncio
-async def test_content_reload_endpoint(fake_backend, fake_zones_http, tmp_path):
-    db_path = str(tmp_path / "game.db")
-    _import_show(
-        db_path,
+async def test_content_reload_endpoint(fake_backend, fake_zones_http, fake_pocketbase, pb, tmp_path):
+    await _import_show(
+        pb,
         "version: '1'\n"
         "rounds:\n"
         "  - id: r1\n"
@@ -199,22 +197,17 @@ async def test_content_reload_endpoint(fake_backend, fake_zones_http, tmp_path):
         "      - {zone: answer_a, label: A}\n"
         "      - {zone: answer_b, label: B}\n",
     )
-    settings = Settings(
-        tracking_ws_url=fake_backend.ws_url,
-        tracking_http_url=fake_zones_http,
-        db_path=db_path,
-    )
-    app = create_app(settings)
+    app = create_app(_settings(fake_backend, fake_zones_http, fake_pocketbase, tmp_path))
 
     async with LifespanManager(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             assert app.state.show.rounds[0].question == "Original"
 
-            # Re-import against the live server's DB (separate connection,
+            # Re-import against the live server's store (separate client,
             # as scripts/import_content.py would), then hot-reload.
-            _import_show(
-                db_path,
+            await _import_show(
+                pb,
                 "version: '2'\n"
                 "rounds:\n"
                 "  - id: r1\n"
@@ -230,8 +223,8 @@ async def test_content_reload_endpoint(fake_backend, fake_zones_http, tmp_path):
 
             # Refused once a round is in flight.
             await client.post("/api/admin/rounds/start")
-            _import_show(
-                db_path,
+            await _import_show(
+                pb,
                 "version: '3'\n"
                 "rounds:\n"
                 "  - id: r1\n"
@@ -246,8 +239,9 @@ async def test_content_reload_endpoint(fake_backend, fake_zones_http, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_show_editor_endpoints(fake_backend, fake_zones_http, tmp_path):
-    settings = _settings(fake_backend, fake_zones_http, tmp_path)
+async def test_show_editor_endpoints(fake_backend, fake_zones_http, fake_pocketbase, pb, tmp_path):
+    await _import_show(pb, _TEST_SHOW)
+    settings = _settings(fake_backend, fake_zones_http, fake_pocketbase, tmp_path)
     app = create_app(settings)
 
     async with LifespanManager(app):
@@ -268,12 +262,12 @@ async def test_show_editor_endpoints(fake_backend, fake_zones_http, tmp_path):
             body = resp.json()
             assert body["reloaded"] is True
             assert body["round"]["question"] == "Beer or wine?"
-            _, rows = app.state.db.load_content()
+            _, rows = await app.state.db.load_content()
             assert rows[0].question == "Beer or wine?"
             assert app.state.show.rounds[0].question == "Beer or wine?"
 
             # Invalid edits are rejected and never reach the DB.
-            before = app.state.db.load_content()
+            before = await app.state.db.load_content()
             resp = await client.put("/api/admin/content/rounds/r1", json={"id": "r2"})
             assert resp.status_code == 400
             resp = await client.put(
@@ -281,7 +275,7 @@ async def test_show_editor_endpoints(fake_backend, fake_zones_http, tmp_path):
                 json={"options": [{"zone": "bogus_zone", "label": "X"}]},
             )
             assert resp.status_code == 400
-            assert app.state.db.load_content() == before
+            assert await app.state.db.load_content() == before
 
             resp = await client.put("/api/admin/content/rounds/ghost", json={"question": "?"})
             assert resp.status_code == 400
@@ -293,14 +287,15 @@ async def test_show_editor_endpoints(fake_backend, fake_zones_http, tmp_path):
             )
             assert resp.status_code == 200
             assert resp.json()["reloaded"] is False
-            _, rows = app.state.db.load_content()
+            _, rows = await app.state.db.load_content()
             assert rows[0].question == "Mid-round edit"
             assert app.state.show.rounds[0].question == "Beer or wine?"
 
 
 @pytest.mark.asyncio
-async def test_tts_endpoint_requires_configuration(fake_backend, fake_zones_http, tmp_path):
-    app = create_app(_settings(fake_backend, fake_zones_http, tmp_path))
+async def test_tts_endpoint_requires_configuration(fake_backend, fake_zones_http, fake_pocketbase, pb, tmp_path):
+    await _import_show(pb, _TEST_SHOW)
+    app = create_app(_settings(fake_backend, fake_zones_http, fake_pocketbase, tmp_path))
 
     async with LifespanManager(app):
         transport = httpx.ASGITransport(app=app)
@@ -312,7 +307,7 @@ async def test_tts_endpoint_requires_configuration(fake_backend, fake_zones_http
 
 @pytest.mark.asyncio
 async def test_tts_endpoint_generates_and_wires_audio(
-    fake_backend, fake_zones_http, tmp_path, monkeypatch
+    fake_backend, fake_zones_http, fake_pocketbase, pb, tmp_path, monkeypatch
 ):
     import dataclasses
 
@@ -326,8 +321,9 @@ async def test_tts_endpoint_generates_and_wires_audio(
 
     monkeypatch.setattr(server.tts, "synthesize", fake_synthesize)
 
+    await _import_show(pb, _TEST_SHOW)
     settings = dataclasses.replace(
-        _settings(fake_backend, fake_zones_http, tmp_path),
+        _settings(fake_backend, fake_zones_http, fake_pocketbase, tmp_path),
         elevenlabs_api_key="k-123",
     )
     app = create_app(settings)
@@ -361,8 +357,9 @@ async def test_tts_endpoint_generates_and_wires_audio(
 
 
 @pytest.mark.asyncio
-async def test_player_page_served(fake_backend, fake_zones_http, tmp_path):
-    app = create_app(_settings(fake_backend, fake_zones_http, tmp_path))
+async def test_player_page_served(fake_backend, fake_zones_http, fake_pocketbase, pb, tmp_path):
+    await _import_show(pb, _TEST_SHOW)
+    app = create_app(_settings(fake_backend, fake_zones_http, fake_pocketbase, tmp_path))
 
     async with LifespanManager(app):
         transport = httpx.ASGITransport(app=app)
@@ -373,8 +370,9 @@ async def test_player_page_served(fake_backend, fake_zones_http, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_audio_files_served_from_audio_dir(fake_backend, fake_zones_http, tmp_path):
-    settings = _settings(fake_backend, fake_zones_http, tmp_path)
+async def test_audio_files_served_from_audio_dir(fake_backend, fake_zones_http, fake_pocketbase, pb, tmp_path):
+    await _import_show(pb, _TEST_SHOW)
+    settings = _settings(fake_backend, fake_zones_http, fake_pocketbase, tmp_path)
     app = create_app(settings)
     # create_app made the dir; drop a narration mp3 in as the operator would.
     (tmp_path / "audio" / "k2_intro.mp3").write_bytes(b"ID3fake-mp3-bytes")

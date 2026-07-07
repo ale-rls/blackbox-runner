@@ -14,7 +14,6 @@ from server.bindings import BindingManager, PlayerState
 from server.content import ShowContent
 from server.engine import GameEngine, RoundState
 from server.models import AudienceSummary
-from server.persistence import Database
 from server.tracking_client import ResyncEvent, TrackingClient
 
 SHOW = {
@@ -40,10 +39,10 @@ def _seed(tracking: TrackingClient, gid: int, zone: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_trackingbox_restart_mid_round_marks_players_absent_not_wrong():
-    db = Database(":memory:")
+async def test_trackingbox_restart_mid_round_marks_players_absent_not_wrong(pb):
+    db = pb
     tracking = TrackingClient("ws://unused")
-    session_id = db.create_session()
+    session_id = await db.create_session()
     manager = await BindingManager.load(db, session_id, tracking)
     show = ShowContent.model_validate(SHOW)
     engine = GameEngine(db, session_id, show, manager, tracking)
@@ -75,10 +74,10 @@ async def test_trackingbox_restart_mid_round_marks_players_absent_not_wrong():
         assert final.tally == {"a": 0, "b": 0}
         assert final.winning_zones == []
 
-        events = db.load_binding_events(session_id)
+        events = await db.load_binding_events(session_id)
         assert [e.reason for e in events if e.player_id == "p1"] == ["claim", "lost"]
 
-        answer_rows = db.load_answers(rt.row_id)
+        answer_rows = await db.load_answers(rt.row_id)
         assert {(r.player_id, r.resolved) for r in answer_rows} == {
             ("p1", "absent"),
             ("p2", "absent"),
@@ -86,4 +85,3 @@ async def test_trackingbox_restart_mid_round_marks_players_absent_not_wrong():
     finally:
         engine.shutdown()
         manager.shutdown()
-        db.close()
