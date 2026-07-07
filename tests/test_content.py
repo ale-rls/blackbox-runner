@@ -4,7 +4,7 @@ import pytest
 
 from server import content_db
 from server.content import ContentError, load_show, validate_show
-from server.persistence import Database
+from server.pocketbase_client import PocketBaseClient
 
 VALID_SHOW = {
     "version": "1",
@@ -114,21 +114,26 @@ def test_repo_show_yaml_loads_against_its_own_zones():
     assert len(show.rounds) >= 1
 
 
-def test_repo_show_yaml_imports_into_db_and_loads_back(tmp_path):
-    """End to end: the real authoring copy imported via the import script,
-    then loaded from the DB the way the server does at startup."""
+@pytest.mark.asyncio
+async def test_repo_show_yaml_imports_into_db_and_loads_back(pb, fake_pocketbase):
+    """End to end: the real authoring copy imported via the import script
+    (pointed at the fake PocketBase), then loaded from the DB the way the
+    server does at startup."""
     import subprocess
     import sys
 
-    db_path = tmp_path / "content.db"
     result = subprocess.run(
         [
             sys.executable,
             "scripts/import_content.py",
             "--content",
             "content/show.yaml",
-            "--db",
-            str(db_path),
+            "--pb-url",
+            fake_pocketbase.url,
+            "--pb-email",
+            "test@example.com",
+            "--pb-password",
+            "pw",
         ],
         capture_output=True,
         text=True,
@@ -136,17 +141,14 @@ def test_repo_show_yaml_imports_into_db_and_loads_back(tmp_path):
     assert result.returncode == 0, result.stderr
 
     file_show = load_show("content/show.yaml")
-    db = Database(str(db_path))
-    try:
-        db_show = content_db.load_show_db(db)
-    finally:
-        db.close()
+    db_show = await content_db.load_show_db(pb)
     assert db_show.version == file_show.version
     assert [r.id for r in db_show.rounds] == [r.id for r in file_show.rounds]
     assert db_show == file_show
 
 
-def test_import_script_rejects_invalid_yaml_without_writing(tmp_path):
+@pytest.mark.asyncio
+async def test_import_script_rejects_invalid_yaml_without_writing(pb, fake_pocketbase, tmp_path):
     import subprocess
     import sys
 
@@ -159,21 +161,26 @@ def test_import_script_rejects_invalid_yaml_without_writing(tmp_path):
         "    options:\n"
         "      - {zone: a, label: only one}\n"  # < 2 options: invalid
     )
-    db_path = tmp_path / "content.db"
     result = subprocess.run(
-        [sys.executable, "scripts/import_content.py", "--content", str(bad), "--db", str(db_path)],
+        [
+            sys.executable,
+            "scripts/import_content.py",
+            "--content",
+            str(bad),
+            "--pb-url",
+            fake_pocketbase.url,
+            "--pb-email",
+            "test@example.com",
+            "--pb-password",
+            "pw",
+        ],
         capture_output=True,
         text=True,
     )
     assert result.returncode == 1
     assert "INVALID" in result.stderr
-    # Nothing was written: even if the DB file was created, it holds no show.
-    if db_path.exists():
-        db = Database(str(db_path))
-        try:
-            assert db.load_content() == ("", [])
-        finally:
-            db.close()
+    # Nothing was written: the store holds no show.
+    assert await pb.load_content() == ("", [])
 
 
 # ---------------------------------------------------------------------- #
@@ -181,13 +188,13 @@ def test_import_script_rejects_invalid_yaml_without_writing(tmp_path):
 # ---------------------------------------------------------------------- #
 
 
-def _db_with(raw: dict) -> Database:
-    db = Database(":memory:")
-    db.save_content(str(raw.get("version", "1")), content_db.rows_from_raw(raw["rounds"]))
-    return db
+async def _db_with(pb: PocketBaseClient, raw: dict) -> PocketBaseClient:
+    await pb.save_content(str(raw.get("version", "1")), content_db.rows_from_raw(raw["rounds"]))
+    return pb
 
 
-def test_load_show_db_round_trips_all_fields():
+@pytest.mark.asyncio
+async def test_load_show_db_round_trips_all_fields(pb):
     raw = {
         "version": "3",
         "rounds": [
@@ -214,37 +221,30 @@ def test_load_show_db_round_trips_all_fields():
             },
         ],
     }
-    db = _db_with(raw)
-    try:
-        show = content_db.load_show_db(db)
-    finally:
-        db.close()
+    await _db_with(pb, raw)
+    show = await content_db.load_show_db(pb)
     assert show == validate_show(raw)
     assert show.rounds[0].text == "Hallo.\nWillkommen."
     assert show.rounds[1].zone_layout == "x_axis"
     assert show.rounds[1].options[1].correct is True
 
 
-def test_load_show_db_empty_db_is_valid_empty_show():
-    db = Database(":memory:")
-    try:
-        show = content_db.load_show_db(db)
-    finally:
-        db.close()
+@pytest.mark.asyncio
+async def test_load_show_db_empty_db_is_valid_empty_show(pb):
+    show = await content_db.load_show_db(pb)
     assert show.rounds == []
 
 
-def test_load_show_db_rejects_unknown_zone():
-    db = _db_with(VALID_SHOW)
-    try:
-        with pytest.raises(ContentError):
-            content_db.load_show_db(db, valid_zone_ids={"a", "c"})  # "b" is missing
-        assert content_db.load_show_db(db, valid_zone_ids={"a", "b"}).rounds[0].id == "r1"
-    finally:
-        db.close()
+@pytest.mark.asyncio
+async def test_load_show_db_rejects_unknown_zone(pb):
+    await _db_with(pb, VALID_SHOW)
+    with pytest.raises(ContentError):
+        await content_db.load_show_db(pb, valid_zone_ids={"a", "c"})  # "b" is missing
+    assert (await content_db.load_show_db(pb, valid_zone_ids={"a", "b"})).rounds[0].id == "r1"
 
 
-def test_derived_zone_layout_not_persisted_as_explicit():
+@pytest.mark.asyncio
+async def test_derived_zone_layout_not_persisted_as_explicit(pb):
     # A scale round derives x_axis at validation time; the stored row must
     # keep zone_layout NULL so a later form change re-derives the layout.
     raw = {
@@ -259,13 +259,10 @@ def test_derived_zone_layout_not_persisted_as_explicit():
             }
         ],
     }
-    db = _db_with(raw)
-    try:
-        _, rows = db.load_content()
-        assert rows[0].zone_layout is None
-        assert content_db.load_show_db(db).rounds[0].zone_layout == "x_axis"
-    finally:
-        db.close()
+    await _db_with(pb, raw)
+    _, rows = await pb.load_content()
+    assert rows[0].zone_layout is None
+    assert (await content_db.load_show_db(pb)).rounds[0].zone_layout == "x_axis"
 
 
 def test_narration_round_loads_without_options(tmp_path):

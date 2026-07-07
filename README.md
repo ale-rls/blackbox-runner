@@ -23,7 +23,7 @@ its `/ws` and `/api/zones` endpoints and never modifies it for game features.
                     ┌──────────────────┐  round/cue WS   ┌────────────────────┐
                     │  TouchDesigner   │◀────────────────│  Game server (new) │
                     │  screen visuals  │                 │  bindings, rounds, │
-                    └──────────────────┘                 │  scoring, SQLite   │
+                    └──────────────────┘                 │  scoring, PocketBase│
                                                          └───┬──────────┬─────┘
                                                              │          │
                                                      player WS      admin WS/REST
@@ -49,7 +49,8 @@ server/
   tracking_client.py   # WS client to TrackingBox: reconnect, snapshot resync
   bindings.py          # player<->GID state machine
   engine.py            # round state machine, timers, zone evaluation, scoring
-  persistence.py       # SQLite (WAL), write-through, crash recovery
+  pocketbase_client.py # PocketBase persistence: write-through, crash recovery
+  persistence.py       # (legacy) SQLite layer, superseded by PocketBase
   replay.py            # post-show timeline / state-at-a-moment reconstruction
   models.py            # pydantic models incl. copied TrackingBox message shapes
   content.py           # validates rounds & questions (pydantic models)

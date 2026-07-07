@@ -15,7 +15,6 @@ import pytest
 
 from server.bindings import BindingManager, PlayerState
 from server.models import AudienceSummary
-from server.persistence import Database
 from server.tracking_client import ChangeEvent, TrackingClient
 
 
@@ -26,10 +25,10 @@ def _seed(tracking: TrackingClient, gid: int, floor: tuple[float, float], zone=N
 
 
 @pytest.mark.asyncio
-async def test_two_players_lost_together_never_get_guessed_then_ritual_resolves_both():
-    db = Database(":memory:")
+async def test_two_players_lost_together_never_get_guessed_then_ritual_resolves_both(pb):
+    db = pb
     tracking = TrackingClient("ws://unused")
-    session_id = db.create_session()
+    session_id = await db.create_session()
     manager = await BindingManager.load(
         db,
         session_id,
@@ -77,10 +76,9 @@ async def test_two_players_lost_together_never_get_guessed_then_ritual_resolves_
         assert manager.get("seat-4").state == PlayerState.BOUND
         assert {manager.get("seat-3").gid, manager.get("seat-4").gid} == {801, 802}
 
-        events = db.load_binding_events(session_id)
+        events = await db.load_binding_events(session_id)
         ritual_events = [e for e in events if e.reason == "ritual"]
         assert len(ritual_events) == 2
         assert {e.player_id for e in ritual_events} == {"seat-3", "seat-4"}
     finally:
         manager.shutdown()
-        db.close()

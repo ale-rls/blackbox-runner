@@ -18,6 +18,13 @@ terminal output before touching anything else.
 
 ## Start order
 
+The game server persists everything in **PocketBase** (see
+[PocketBase persistence backend](#pocketbase-persistence-backend) below) —
+make sure `POCKETBASE_URL` / `POCKETBASE_ADMIN_EMAIL` /
+`POCKETBASE_ADMIN_PASSWORD` are set in `.env` and the instance is
+reachable, or the game server refuses to start (deliberately: there is no
+degraded mode without persistence).
+
 Start TrackingBox **first**, wait for it to be healthy, **then** start the
 game server. Starting them the other way round isn't harmful (the game
 server retries the connection), but it makes the first couple of minutes
@@ -188,9 +195,9 @@ re-run.
 ## Crash recovery: what actually happens
 
 Every meaningful state change (a claim, a rebind, a round opening,
-closing, or revealing, a score) is written to SQLite immediately — not
+closing, or revealing, a score) is written to PocketBase immediately — not
 batched, not buffered. If the game server process dies for any reason and
-you restart it against the same database file:
+you restart it against the same PocketBase instance:
 
 - Every player's binding state (who's bound to what GID, or lost) is
   exactly as it was the instant before the crash.
@@ -204,13 +211,13 @@ you restart it against the same database file:
   (the server doesn't know how long it was down for).
 
 You do not need to do anything special to "resume" a session — starting
-the game server against the same `--db` file (the default, unless
-`GAME_DB_PATH` was overridden) picks the same session back up
-automatically. The startup log line tells you which happened:
+the game server against the same PocketBase instance picks the same
+active session back up automatically. The startup log line tells you
+which happened:
 
 ```
-Started new session 1              # fresh start
-Resuming session 1 (crash recovery)  # picked up where it left off
+Started new session abc123def456xyz              # fresh start
+Resuming session abc123def456xyz (crash recovery)  # picked up where it left off
 ```
 
 ## Post-show: replay and audit
@@ -220,16 +227,64 @@ timestamp and a reason — this is the "why did seat-14 lose points in round
 3" answer machine.
 
 ```bash
-python scripts/replay.py --db data/blackbox-runner.db --list-sessions
-python scripts/replay.py --db data/blackbox-runner.db --timeline
-python scripts/replay.py --db data/blackbox-runner.db --player seat-14
-python scripts/replay.py --db data/blackbox-runner.db --at 1730000000   # state as of a unix timestamp
+python scripts/replay.py --list-sessions
+python scripts/replay.py --timeline
+python scripts/replay.py --player seat-14
+python scripts/replay.py --at 1730000000   # state as of a unix timestamp
 ```
 
-This is safe to run while the show is still live (SQLite WAL mode allows
-concurrent reads), so it also works as a rehearsal-night tuning tool — see
+(Connection settings come from `.env`'s `POCKETBASE_*` values; override
+with `--pb-url`/`--pb-email`/`--pb-password`.)
+
+This is safe to run while the show is still live (it only reads, and
+PocketBase serves concurrent HTTP reads as a matter of course), so it also
+works as a rehearsal-night tuning tool — see
 `docs/architecture.md` §7's note on the rehearsal telemetry feedback loop
 for `REBIND_MAX_DISTANCE` / `REBIND_MAX_GAP_S` / `ORPHAN_AFTER_S`.
+
+## PocketBase persistence backend
+
+Since issue #16 the game server keeps **all** runtime state — sessions,
+player bindings, binding-event audit trail, rounds, answers, scores, and
+the imported show content — in a PocketBase instance instead of a local
+SQLite file. Configuration (`.env`):
+
+```bash
+POCKETBASE_URL=https://your-pocketbase-host
+POCKETBASE_ADMIN_EMAIL=...
+POCKETBASE_ADMIN_PASSWORD=...
+```
+
+Collections are created once with `python scripts/pocketbase_bootstrap.py`
+(idempotent; `--force` recreates, destroying records). Auth model: the
+Python server authenticates as a PocketBase **superuser** and keeps that
+token strictly server-side — it is never sent to any browser, and must
+never appear in a Docker build arg or committed file. Browsers get
+anonymous public **read** access to exactly two collections, `rounds` and
+`score_events` (for the player frontend's realtime subscriptions);
+`answers` (individual players' choices), `players`, `binding_events`, and
+content stay superuser-only.
+
+Known MVP gaps, accepted deliberately (future-facing work, not
+show-blocking — revisit before relying on this in a live show):
+
+* **Reveal replay can double-score.** Round phase transitions
+  (`closing` → `revealed` → `done`) are separate HTTP writes; recovery
+  after a crash *between* the last two treats the round as un-revealed,
+  and re-revealing re-inserts score events. This window existed with
+  SQLite too but is much wider over HTTP. Fix candidates: preserve the
+  real recovered state instead of collapsing to `closing`, or make score
+  events idempotent per (round, player).
+* **Content replace is not atomic.** `save_content` (import script and
+  admin editor both) deletes all rounds then re-creates them — PocketBase
+  has no cross-record transaction over REST. A crash mid-replace leaves a
+  partial show; the immediate re-count check makes this loud, not silent,
+  and re-running the import fixes it.
+* **Transient network errors.** Every write retries a few times inside
+  the client; a persistent PocketBase outage mid-show stalls writes and
+  surfaces as 500s on claims/round controls. The show cannot run without
+  its persistence backend — treat PocketBase reachability as show-critical
+  infrastructure, same tier as TrackingBox.
 
 ## Content freeze process
 
@@ -255,7 +310,7 @@ import → reload:
 3. Import it into the game database (validates again; writes nothing if
    invalid — add `--dry-run` to only check):
    ```bash
-   python scripts/import_content.py   # defaults: content/show.yaml -> data/blackbox-runner.db
+   python scripts/import_content.py   # defaults: content/show.yaml -> the PocketBase in .env
    ```
 4. If the server is already running, apply it without a restart:
    ```bash

@@ -1,12 +1,15 @@
 """Structured edits to the DB-stored show from the admin console.
 
-The content_rounds table is the runtime source of truth (seeded from the
-authoring copy content/show.yaml via scripts/import_content.py); browser
-edits merge fields into one round and rewrite the whole show in a single
-transaction.
+The content_rounds collection is the runtime source of truth (seeded from
+the authoring copy content/show.yaml via scripts/import_content.py);
+browser edits merge fields into one round and rewrite the whole show.
 
 Every edit is validated as a complete show (same rules as startup loading)
-before anything is written; an invalid edit leaves the stored rows untouched.
+before anything is written; an invalid edit leaves the stored rows
+untouched. Unlike the old SQLite layer, PocketBase has no cross-record
+transaction, so the rewrite itself has a small non-atomic window — the
+client's save_content re-checks the stored count immediately after so a
+partial replace fails loudly instead of silently (documented MVP gap).
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ from typing import Optional
 
 from . import content_db
 from .content import ContentError, ShowContent, validate_show
-from .persistence import Database
+from .pocketbase_client import PocketBaseClient
 
 # Fields the admin editor may change. id is the round's identity (audio
 # filenames and persisted answer rows key on it) and stays authoring-only,
@@ -37,8 +40,8 @@ EDITABLE_FIELDS = frozenset(
 )
 
 
-def update_round(
-    db: Database,
+async def update_round(
+    db: PocketBaseClient,
     round_id: str,
     fields: dict,
     *,
@@ -54,7 +57,7 @@ def update_round(
     if unknown:
         raise ContentError(f"field(s) not editable: {sorted(unknown)}")
 
-    version, rows = db.load_content()
+    version, rows = await db.load_content()
     rounds = [content_db.row_to_raw(r) for r in rows]
     target = next((r for r in rounds if r["id"] == round_id), None)
     if target is None:
@@ -72,12 +75,12 @@ def update_round(
     show = validate_show(
         raw, valid_zone_ids=valid_zone_ids, source="edited show content (database)"
     )
-    db.save_content(version, content_db.rows_from_raw(rounds))
+    await db.save_content(version, content_db.rows_from_raw(rounds))
     return show
 
 
-def create_round(
-    db: Database,
+async def create_round(
+    db: PocketBaseClient,
     new_round: dict,
     *,
     after_id: Optional[str] = None,
@@ -95,7 +98,7 @@ def create_round(
     if not round_id:
         raise ContentError("new round needs an id")
 
-    version, rows = db.load_content()
+    version, rows = await db.load_content()
     rounds = [content_db.row_to_raw(r) for r in rows]
     if any(r["id"] == round_id for r in rounds):
         raise ContentError(f"round id {round_id!r} already exists")
@@ -114,12 +117,12 @@ def create_round(
     show = validate_show(
         raw, valid_zone_ids=valid_zone_ids, source="edited show content (database)"
     )
-    db.save_content(version, content_db.rows_from_raw(rounds))
+    await db.save_content(version, content_db.rows_from_raw(rounds))
     return show
 
 
-def delete_round(
-    db: Database,
+async def delete_round(
+    db: PocketBaseClient,
     round_id: str,
     *,
     valid_zone_ids: Optional[set[str]] = None,
@@ -130,7 +133,7 @@ def delete_round(
     fails validation (rows unchanged) — e.g. this was the last remaining
     reference some other check depended on.
     """
-    version, rows = db.load_content()
+    version, rows = await db.load_content()
     rounds = [content_db.row_to_raw(r) for r in rows]
     remaining = [r for r in rounds if r["id"] != round_id]
     if len(remaining) == len(rounds):
@@ -142,5 +145,5 @@ def delete_round(
     show = validate_show(
         raw, valid_zone_ids=valid_zone_ids, source="edited show content (database)"
     )
-    db.save_content(version, content_db.rows_from_raw(remaining))
+    await db.save_content(version, content_db.rows_from_raw(remaining))
     return show

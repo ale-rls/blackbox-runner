@@ -27,7 +27,7 @@ from .config import Settings
 from .content import ContentError, ShowContent
 from .engine import EngineError, GameEngine
 from .models import ZoneMap
-from .persistence import Database
+from .pocketbase_client import PocketBaseClient
 from .tracking_client import TrackingClient, fetch_zones
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -105,10 +105,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         reconnect_max_s=settings.reconnect_max_s,
         history_seconds=settings.position_history_seconds,
     )
-    db = Database(settings.db_path)
+    if not settings.pocketbase_admin_email or not settings.pocketbase_admin_password:
+        raise RuntimeError(
+            "PocketBase credentials missing — set POCKETBASE_ADMIN_EMAIL and "
+            "POCKETBASE_ADMIN_PASSWORD (see .env.example). The game server "
+            "cannot run without its persistence backend."
+        )
+    db = PocketBaseClient(
+        settings.pocketbase_url,
+        settings.pocketbase_admin_email,
+        settings.pocketbase_admin_password,
+    )
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
+        # Persistence first, and hard-fail: unlike tracking there is no
+        # degraded mode without it — no session, no crash recovery, nothing.
+        await db.connect()
+
         tracking_task = asyncio.create_task(tracking.run())
         try:
             await tracking.wait_connected(timeout=10)
@@ -120,12 +134,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             log.warning("Could not fetch zones from TrackingBox: %s", exc)
             app.state.zones = ZoneMap(enabled=False, default_zone=None, zones=[])
 
-        session_id = await asyncio.to_thread(db.get_active_session_id)
+        session_id = await db.get_active_session_id()
         if session_id is None:
-            session_id = await asyncio.to_thread(db.create_session)
-            log.info("Started new session %d", session_id)
+            session_id = await db.create_session()
+            log.info("Started new session %s", session_id)
         else:
-            log.info("Resuming session %d (crash recovery)", session_id)
+            log.info("Resuming session %s (crash recovery)", session_id)
         bindings = await BindingManager.load(
             db,
             session_id,
@@ -139,8 +153,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.session_id = session_id
 
         try:
-            show = await asyncio.to_thread(
-                content_db.load_show_db, db, valid_zone_ids=app.state.zones.zone_ids()
+            show = await content_db.load_show_db(
+                db, valid_zone_ids=app.state.zones.zone_ids()
             )
             log.info("Loaded show content: %d round(s) from database", len(show.rounds))
         except ContentError as exc:
@@ -164,7 +178,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-            await asyncio.to_thread(db.close)
+            await db.close()
 
     app = FastAPI(title="Blackbox Runner", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
@@ -265,8 +279,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         isn't safe to use).
         """
         try:
-            show = await asyncio.to_thread(
-                content_db.load_show_db, db, valid_zone_ids=app.state.zones.zone_ids()
+            show = await content_db.load_show_db(
+                db, valid_zone_ids=app.state.zones.zone_ids()
             )
         except ContentError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -304,7 +318,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/admin/content")
     async def get_content() -> dict:
         try:
-            show = await asyncio.to_thread(content_db.load_show_db, db)
+            show = await content_db.load_show_db(db)
         except ContentError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         audio_dir = Path(settings.audio_dir)
@@ -327,8 +341,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.put("/api/admin/content/rounds/{round_id}")
     async def update_round(round_id: str, fields: dict) -> dict:
         try:
-            show = await asyncio.to_thread(
-                show_store.update_round,
+            show = await show_store.update_round(
                 db,
                 round_id,
                 fields,
@@ -347,8 +360,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not isinstance(new_round, dict):
             raise HTTPException(status_code=400, detail="body must include a 'round' object")
         try:
-            show = await asyncio.to_thread(
-                show_store.create_round,
+            show = await show_store.create_round(
                 db,
                 new_round,
                 after_id=after_id,
@@ -363,8 +375,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.delete("/api/admin/content/rounds/{round_id}")
     async def delete_round(round_id: str) -> dict:
         try:
-            show = await asyncio.to_thread(
-                show_store.delete_round,
+            show = await show_store.delete_round(
                 db,
                 round_id,
                 valid_zone_ids=_edit_zone_ids(),
@@ -384,7 +395,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Read fresh from the DB, not the running engine: an edit saved
         # mid-round (reloaded: false) must still be what gets narrated.
         try:
-            show = await asyncio.to_thread(content_db.load_show_db, db)
+            show = await content_db.load_show_db(db)
         except ContentError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         round_ = next((r for r in show.rounds if r.id == round_id), None)
@@ -412,8 +423,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         filename = f"{round_id}.mp3"
         await asyncio.to_thread((Path(settings.audio_dir) / filename).write_bytes, audio_bytes)
-        show = await asyncio.to_thread(
-            show_store.update_round,
+        show = await show_store.update_round(
             db,
             round_id,
             {"audio": filename},

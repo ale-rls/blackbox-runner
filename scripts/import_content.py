@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """Import the authoring copy content/show.yaml into the game database.
 
-The DB (content_rounds/content_meta) is what the server actually loads;
-show.yaml stays the git-tracked authoring source. Run this after every edit
-that must go live — it validates the whole show first and writes nothing on
-failure. Structural changes (add/remove/reorder rounds, option zone
-mappings) can ONLY be applied this way; the admin console edits existing
-rounds' text/timing/labels in place.
+PocketBase's content_rounds/content_meta collections are what the server
+actually loads; show.yaml stays the git-tracked authoring source. Run this
+after every edit that must go live — it validates the whole show first and
+writes nothing on failure. Structural changes (add/remove/reorder rounds,
+option zone mappings) can ONLY be applied this way; the admin console edits
+existing rounds' text/timing/labels in place.
 
 Usage:
     python scripts/import_content.py [--content content/show.yaml] \
-        [--db data/blackbox-runner.db] [--tracking-http http://localhost:8000] [--dry-run]
+        [--tracking-http http://localhost:8000] [--dry-run]
+
+PocketBase connection settings come from Settings/.env (POCKETBASE_URL,
+POCKETBASE_ADMIN_EMAIL, POCKETBASE_ADMIN_PASSWORD) unless overridden with
+--pb-url/--pb-email/--pb-password.
 
 --tracking-http additionally validates option zones against a running
 TrackingBox's real zone map (same check as scripts/validate_content.py);
@@ -20,6 +24,7 @@ without it, zone ids are not cross-checked.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 import urllib.request
 from pathlib import Path
@@ -29,15 +34,19 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from server import content_db  # noqa: E402
+from server.config import Settings  # noqa: E402
 from server.content import ContentError, validate_show  # noqa: E402
 from server.models import ZoneMap  # noqa: E402
-from server.persistence import Database  # noqa: E402
+from server.pocketbase_client import PocketBaseClient  # noqa: E402
 
 
-def main() -> int:
+async def main() -> int:
+    settings = Settings.load()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--content", default="content/show.yaml")
-    parser.add_argument("--db", default="data/blackbox-runner.db")
+    parser.add_argument("--pb-url", default=settings.pocketbase_url)
+    parser.add_argument("--pb-email", default=settings.pocketbase_admin_email)
+    parser.add_argument("--pb-password", default=settings.pocketbase_admin_password)
     parser.add_argument(
         "--tracking-http",
         default=None,
@@ -57,7 +66,7 @@ def main() -> int:
             return 2
 
     try:
-        raw = yaml.safe_load(Path(args.content).read_text())
+        raw = yaml.safe_load(Path(args.content).read_text(encoding="utf-8"))
         show = validate_show(
             raw, valid_zone_ids=valid_zone_ids, source=f"show content at {args.content}"
         )
@@ -77,15 +86,20 @@ def main() -> int:
         print(f"OK (dry run): {args.content} — version {version!r}, {len(rows)} round(s); not written")
         return 0
 
-    db = Database(args.db)
+    if not args.pb_email or not args.pb_password:
+        print("POCKETBASE_ADMIN_EMAIL / POCKETBASE_ADMIN_PASSWORD not set", file=sys.stderr)
+        return 2
+
+    client = PocketBaseClient(args.pb_url, args.pb_email, args.pb_password)
     try:
-        db.save_content(version, rows)
+        await client.connect()
+        await client.save_content(version, rows)
     finally:
-        db.close()
-    print(f"Imported {len(rows)} round(s) (version {version!r}) from {args.content} into {args.db}")
+        await client.close()
+    print(f"Imported {len(rows)} round(s) (version {version!r}) from {args.content} into {args.pb_url}")
     print("If the server is running, apply with: POST /api/admin/content/reload")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(asyncio.run(main()))

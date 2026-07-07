@@ -1,5 +1,5 @@
 """Scripted churn scenario: the game server itself crashes and restarts
-mid-round (docs/architecture.md §5, §7 — "SQLite recovery").
+mid-round (docs/architecture.md §5, §7 — persistence recovery).
 
 Combines Phase 1's binding-state recovery (tests/test_crash_recovery.py)
 with Phase 4's round-state recovery (GameEngine.load): after "restart",
@@ -16,7 +16,7 @@ from server.bindings import BindingManager, PlayerState
 from server.content import ShowContent
 from server.engine import GameEngine, RoundState
 from server.models import AudienceSummary
-from server.persistence import Database
+from server.pocketbase_client import PocketBaseClient
 from server.tracking_client import ChangeEvent, TrackingClient
 
 SHOW = {
@@ -51,13 +51,12 @@ def _seed(tracking: TrackingClient, gid: int, zone: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_server_restart_mid_round_preserves_bindings_and_round_state(tmp_path):
-    db_path = str(tmp_path / "game.db")
-
+async def test_server_restart_mid_round_preserves_bindings_and_round_state(fake_pocketbase):
     # --- "first run" ---
-    db = Database(db_path)
+    db = PocketBaseClient(fake_pocketbase.url, "test@example.com", "pw")
+    await db.connect()
     tracking = TrackingClient("ws://unused")
-    session_id = db.create_session()
+    session_id = await db.create_session()
     manager = await BindingManager.load(db, session_id, tracking)
     show = ShowContent.model_validate(SHOW)
     engine = GameEngine(db, session_id, show, manager, tracking)
@@ -74,16 +73,17 @@ async def test_server_restart_mid_round_preserves_bindings_and_round_state(tmp_p
 
     manager.shutdown()
     engine.shutdown()
-    db.close()  # simulate the process dying
+    await db.close()  # simulate the process dying
 
-    # --- "restart": fresh everything, same DB file and session ---
-    db2 = Database(db_path)
+    # --- "restart": fresh everything, same PocketBase instance and session ---
+    db2 = PocketBaseClient(fake_pocketbase.url, "test@example.com", "pw")
+    await db2.connect()
     tracking2 = TrackingClient("ws://unused")
     _seed(tracking2, 1, "a")
     _seed(tracking2, 2, "a")
     _seed(tracking2, 3, "b")
 
-    recovered_session_id = db2.get_active_session_id()
+    recovered_session_id = await db2.get_active_session_id()
     assert recovered_session_id == session_id
 
     manager2 = await BindingManager.load(db2, recovered_session_id, tracking2)
@@ -114,4 +114,4 @@ async def test_server_restart_mid_round_preserves_bindings_and_round_state(tmp_p
     finally:
         manager2.shutdown()
         engine2.shutdown()
-        db2.close()
+        await db2.close()

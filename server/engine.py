@@ -27,7 +27,7 @@ from typing import Optional
 
 from .bindings import BindingManager, PlayerState
 from .content import RoundContent, ShowContent
-from .persistence import AnswerRow, Database
+from .pocketbase_client import AnswerRow, PocketBaseClient
 from .tracking_client import TrackingClient
 from .zones import resolve_zone
 
@@ -49,7 +49,7 @@ class EngineError(ValueError):
 @dataclass(slots=True)
 class RoundRuntime:
     content: RoundContent
-    row_id: int
+    row_id: str  # PocketBase record id of the rounds row
     index: int
     state: RoundState = RoundState.PENDING
     opened_at: Optional[float] = None
@@ -68,8 +68,8 @@ class EngineEvent:
 class GameEngine:
     def __init__(
         self,
-        db: Database,
-        session_id: int,
+        db: PocketBaseClient,
+        session_id: str,
         show: ShowContent,
         bindings: BindingManager,
         tracking: TrackingClient,
@@ -117,8 +117,8 @@ class GameEngine:
     @classmethod
     async def load(
         cls,
-        db: Database,
-        session_id: int,
+        db: PocketBaseClient,
+        session_id: str,
         show: ShowContent,
         bindings: BindingManager,
         tracking: TrackingClient,
@@ -136,7 +136,7 @@ class GameEngine:
         replay either.
         """
         engine = cls(db, session_id, show, bindings, tracking, **kwargs)
-        rows = await asyncio.to_thread(db.load_rounds, session_id)
+        rows = await db.load_rounds(session_id)
         if not rows:
             return engine
 
@@ -148,7 +148,7 @@ class GameEngine:
         content = next((r for r in show.rounds if r.id == last.question_id), None)
         if content is None:
             log.warning(
-                "Recovered round row %d references unknown content id %r; treating as done",
+                "Recovered round row %s references unknown content id %r; treating as done",
                 last.id,
                 last.question_id,
             )
@@ -158,12 +158,12 @@ class GameEngine:
         rt.state = RoundState.CLOSING
         rt.opened_at = last.opened_at
         rt.closed_at = last.closed_at or time.time()
-        answer_rows = await asyncio.to_thread(db.load_answers, last.id)
+        answer_rows = await db.load_answers(last.id)
         for row in answer_rows:
             rt.answers[row.player_id] = (row.zone_id, row.resolved)
         engine._current = rt
-        await asyncio.to_thread(
-            db.update_round_state, last.id, RoundState.CLOSING.value, rt.opened_at, rt.closed_at
+        await db.update_round_state(
+            last.id, RoundState.CLOSING.value, rt.opened_at, rt.closed_at
         )
         log.warning(
             "Recovered mid-round state for round %r (index %d) after restart; %d answer(s) "
@@ -186,7 +186,7 @@ class GameEngine:
         return self._index + 1 < len(self.show.rounds)
 
     async def scores(self) -> dict[str, int]:
-        return await asyncio.to_thread(self._db.sum_scores, self.session_id)
+        return await self._db.sum_scores(self.session_id)
 
     def player_answer(self, player_id: str) -> Optional[tuple[Optional[str], str]]:
         if self._current is None:
@@ -229,15 +229,13 @@ class GameEngine:
 
         self._index += 1
         content = self.show.rounds[self._index]
-        row_id = await asyncio.to_thread(
-            self._db.create_round, self.session_id, self._index, content.id
-        )
+        row_id = await self._db.create_round(self.session_id, self._index, content.id)
         rt = RoundRuntime(content=content, row_id=row_id, index=self._index)
         rt.state = RoundState.ACTIVE
         rt.opened_at = time.time()
         self._current = rt
-        await asyncio.to_thread(
-            self._db.update_round_state, row_id, RoundState.ACTIVE.value, rt.opened_at, None
+        await self._db.update_round_state(
+            row_id, RoundState.ACTIVE.value, rt.opened_at, None
         )
 
         self._publish(EngineEvent("round_opened", self.round_payload(rt)))
@@ -325,20 +323,28 @@ class GameEngine:
         rt.state = RoundState.CLOSING
         rt.closed_at = time.time()
         self._cancel_zone_task()
-        await asyncio.to_thread(
-            self._db.update_round_state, rt.row_id, RoundState.CLOSING.value, rt.opened_at, rt.closed_at
+        # Phase transition writes stay strictly sequential — crash recovery
+        # (see load()) keys off which transition landed in the DB.
+        await self._db.update_round_state(
+            rt.row_id, RoundState.CLOSING.value, rt.opened_at, rt.closed_at
         )
 
         # Narration has no answers to capture — every player would just be
         # recorded absent, polluting the answers table.
         if rt.content.type != "narration":
             valid_zones = {opt.zone for opt in rt.content.options}
+            # Per-player writes within the phase are order-independent;
+            # gather them so a 30-person cast doesn't serialize 30 HTTP
+            # round trips of dead air before the closing event fires.
+            writes = []
             for player in self._bindings.all_players():
                 zone = self._current_zone(player, rt)
                 if zone in valid_zones:
-                    await self._set_answer(rt, player.id, zone, "answered")
+                    writes.append(self._set_answer(rt, player.id, zone, "answered"))
                 else:
-                    await self._set_answer(rt, player.id, None, "absent")
+                    writes.append(self._set_answer(rt, player.id, None, "absent"))
+            if writes:
+                await asyncio.gather(*writes)
 
         self._publish(EngineEvent("round_closing", self.round_payload(rt)))
 
@@ -348,13 +354,16 @@ class GameEngine:
         # both look identical from here: not captured at close, captured now)
         # and is now standing in a valid zone gets upgraded to late_grace.
         valid_zones = {opt.zone for opt in rt.content.options}
+        upgrades = []
         for player in self._bindings.all_players():
             _, resolved = rt.answers.get(player.id, (None, "absent"))
             if resolved not in ("absent",):
                 continue
             new_zone = self._current_zone(player, rt)
             if new_zone in valid_zones:
-                await self._set_answer(rt, player.id, new_zone, "late_grace")
+                upgrades.append(self._set_answer(rt, player.id, new_zone, "late_grace"))
+        if upgrades:
+            await asyncio.gather(*upgrades)
 
         self._publish(EngineEvent("answers_locked", self.round_payload(rt)))
 
@@ -365,20 +374,21 @@ class GameEngine:
         rt.tally = tally
         rt.winning_zones = self._winning_zones(rt)
         rt.state = RoundState.REVEALED
-        await asyncio.to_thread(
-            self._db.update_round_state, rt.row_id, RoundState.REVEALED.value, rt.opened_at, rt.closed_at
+        # Sequential on purpose (see _do_close): recovery semantics depend
+        # on the closing -> revealed -> done write order.
+        await self._db.update_round_state(
+            rt.row_id, RoundState.REVEALED.value, rt.opened_at, rt.closed_at
         )
 
-        for player_id, (zone, resolved) in rt.answers.items():
-            if resolved in ("answered", "late_grace") and zone in rt.winning_zones:
-                await asyncio.to_thread(
-                    self._db.record_score_event,
-                    self.session_id,
-                    player_id,
-                    rt.row_id,
-                    rt.content.points,
-                    rt.content.type,
-                )
+        score_writes = [
+            self._db.record_score_event(
+                self.session_id, player_id, rt.row_id, rt.content.points, rt.content.type
+            )
+            for player_id, (zone, resolved) in rt.answers.items()
+            if resolved in ("answered", "late_grace") and zone in rt.winning_zones
+        ]
+        if score_writes:
+            await asyncio.gather(*score_writes)
 
         self._publish(
             EngineEvent(
@@ -390,8 +400,8 @@ class GameEngine:
         scores = await self.scores()
         self._publish(EngineEvent("scores_updated", {"scores": scores}))
         rt.state = RoundState.DONE
-        await asyncio.to_thread(
-            self._db.update_round_state, rt.row_id, RoundState.DONE.value, rt.opened_at, rt.closed_at
+        await self._db.update_round_state(
+            rt.row_id, RoundState.DONE.value, rt.opened_at, rt.closed_at
         )
 
     def _current_zone(self, player, rt: RoundRuntime) -> Optional[str]:
@@ -417,8 +427,7 @@ class GameEngine:
             state = self._tracking.get(player.gid)
             if state and state.floor:
                 x, y = state.floor
-        await asyncio.to_thread(
-            self._db.record_answer,
+        await self._db.record_answer(
             AnswerRow(
                 round_id=rt.row_id,
                 session_id=self.session_id,

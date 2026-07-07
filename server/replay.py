@@ -7,9 +7,9 @@ concrete rather than aspirational — a real question a director asks the
 morning after ("why did seat-14 lose their points in round 3?") should be
 answerable by pointing at a specific row, not a shrug.
 
-Read-only: this module never writes to the database, so it's safe to run
-against a live show's DB file (WAL mode allows concurrent reads) as well as
-after the fact.
+Read-only: this module never writes, so it's safe to run against a live
+show's PocketBase instance (concurrent HTTP reads are the normal case for
+it) as well as after the fact.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from .persistence import Database
+from .pocketbase_client import PocketBaseClient
 
 
 @dataclass(slots=True)
@@ -28,11 +28,11 @@ class TimelineEntry:
     detail: dict
 
 
-def build_timeline(db: Database, session_id: int) -> list[TimelineEntry]:
+async def build_timeline(db: PocketBaseClient, session_id: str) -> list[TimelineEntry]:
     """Every binding, answer, and score event for a session, chronological."""
     entries: list[TimelineEntry] = []
 
-    for e in db.load_binding_events(session_id):
+    for e in await db.load_binding_events(session_id):
         entries.append(
             TimelineEntry(
                 at=e.at,
@@ -42,8 +42,8 @@ def build_timeline(db: Database, session_id: int) -> list[TimelineEntry]:
             )
         )
 
-    for r in db.load_rounds(session_id):
-        for a in db.load_answers(r.id):
+    for r in await db.load_rounds(session_id):
+        for a in await db.load_answers(r.id):
             entries.append(
                 TimelineEntry(
                     at=a.at,
@@ -58,7 +58,7 @@ def build_timeline(db: Database, session_id: int) -> list[TimelineEntry]:
                 )
             )
 
-    for s in db.load_score_events(session_id):
+    for s in await db.load_score_events(session_id):
         entries.append(
             TimelineEntry(
                 at=s.at,
@@ -78,11 +78,13 @@ class PlayerSnapshot:
     state: str  # "bound" | "lost" (only states binding_events distinguish)
 
 
-def binding_state_at(db: Database, session_id: int, at: float) -> dict[str, PlayerSnapshot]:
+async def binding_state_at(
+    db: PocketBaseClient, session_id: str, at: float
+) -> dict[str, PlayerSnapshot]:
     """Every player's gid/state as of ``at``, by replaying binding_events
     in order up to (and including) that timestamp."""
     snapshots: dict[str, PlayerSnapshot] = {}
-    for e in db.load_binding_events(session_id):
+    for e in await db.load_binding_events(session_id):
         if e.at > at:
             break
         if e.reason == "lost":
@@ -92,18 +94,20 @@ def binding_state_at(db: Database, session_id: int, at: float) -> dict[str, Play
     return snapshots
 
 
-def scores_at(db: Database, session_id: int, at: float) -> dict[str, int]:
+async def scores_at(db: PocketBaseClient, session_id: str, at: float) -> dict[str, int]:
     """Every player's running total as of ``at``."""
     totals: dict[str, int] = {}
-    for s in db.load_score_events(session_id):
+    for s in await db.load_score_events(session_id):
         if s.at > at:
             break
         totals[s.player_id] = totals.get(s.player_id, 0) + s.points
     return totals
 
 
-def explain_player(db: Database, session_id: int, player_id: str) -> list[TimelineEntry]:
+async def explain_player(
+    db: PocketBaseClient, session_id: str, player_id: str
+) -> list[TimelineEntry]:
     """The full history for one player — binding changes, answers, and
     score events, chronological. Directly answers "why did X happen to
     seat-14?"."""
-    return [e for e in build_timeline(db, session_id) if e.player_id == player_id]
+    return [e for e in await build_timeline(db, session_id) if e.player_id == player_id]

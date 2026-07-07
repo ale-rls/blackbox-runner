@@ -1,7 +1,9 @@
 """Phase 1 exit criterion: kill/restart the game server mid-session with no
-state loss. Simulated here by closing the Database and BindingManager and
-reconstructing fresh ones against the same SQLite file/session, the same way
-``create_app``'s lifespan does on startup.
+state loss. Simulated here by closing the PocketBaseClient and
+BindingManager and reconstructing fresh ones against the same (fake)
+PocketBase instance and session, the same way ``create_app``'s lifespan
+does on startup — the instance outlives game-server processes exactly like
+the SQLite file used to.
 """
 
 from __future__ import annotations
@@ -10,7 +12,7 @@ import pytest
 
 from server.bindings import BindingManager, PlayerState
 from server.models import AudienceSummary
-from server.persistence import Database
+from server.pocketbase_client import PocketBaseClient
 from server.tracking_client import TrackingClient
 
 
@@ -19,12 +21,11 @@ def _seed(tracking: TrackingClient, gid: int) -> None:
 
 
 @pytest.mark.asyncio
-async def test_bindings_survive_server_restart(tmp_path):
-    db_path = str(tmp_path / "game.db")
-
+async def test_bindings_survive_server_restart(fake_pocketbase):
     # --- "first run" of the game server ---
-    db = Database(db_path)
-    session_id = db.create_session()
+    db = PocketBaseClient(fake_pocketbase.url, "test@example.com", "pw")
+    await db.connect()
+    session_id = await db.create_session()
     tracking = TrackingClient("ws://unused")
     for gid in range(1, 6):
         _seed(tracking, gid)
@@ -42,14 +43,15 @@ async def test_bindings_survive_server_restart(tmp_path):
     assert before["p2"] == (PlayerState.LOST, None)
     assert before["p0"] == (PlayerState.BOUND, 1)
 
-    db.close()  # simulate the process dying
+    await db.close()  # simulate the process dying
 
     # --- "restart" ---
-    db2 = Database(db_path)
+    db2 = PocketBaseClient(fake_pocketbase.url, "test@example.com", "pw")
+    await db2.connect()
     tracking2 = TrackingClient("ws://unused")
     for gid in range(1, 6):
         _seed(tracking2, gid)
-    recovered_session_id = db2.get_active_session_id()
+    recovered_session_id = await db2.get_active_session_id()
     assert recovered_session_id == session_id
 
     bindings2 = await BindingManager.load(db2, recovered_session_id, tracking2)
@@ -60,4 +62,4 @@ async def test_bindings_survive_server_restart(tmp_path):
     assert bindings2.player_for_gid(1).id == "p0"
     assert bindings2.player_for_gid(3) is None  # p2's old gid, now unbound
 
-    db2.close()
+    await db2.close()
