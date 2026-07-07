@@ -74,3 +74,73 @@ def update_round(
     )
     db.save_content(version, content_db.rows_from_raw(rounds))
     return show
+
+
+def create_round(
+    db: Database,
+    new_round: dict,
+    *,
+    after_id: Optional[str] = None,
+    valid_zone_ids: Optional[set[str]] = None,
+) -> ShowContent:
+    """Insert a new round (a raw dict, same shape as one show.yaml entry)
+    into the stored show and write it back.
+
+    Placed at the end unless ``after_id`` names an existing round to insert
+    after. Raises ContentError for a missing/duplicate id, an unknown
+    ``after_id``, or if the resulting show fails validation (rows
+    unchanged).
+    """
+    round_id = new_round.get("id")
+    if not round_id:
+        raise ContentError("new round needs an id")
+
+    version, rows = db.load_content()
+    rounds = [content_db.row_to_raw(r) for r in rows]
+    if any(r["id"] == round_id for r in rounds):
+        raise ContentError(f"round id {round_id!r} already exists")
+
+    if after_id is None:
+        rounds.append(new_round)
+    else:
+        idx = next((i for i, r in enumerate(rounds) if r["id"] == after_id), None)
+        if idx is None:
+            raise ContentError(f"unknown round {after_id!r}")
+        rounds.insert(idx + 1, new_round)
+
+    raw: dict = {"rounds": rounds}
+    if version:
+        raw["version"] = version
+    show = validate_show(
+        raw, valid_zone_ids=valid_zone_ids, source="edited show content (database)"
+    )
+    db.save_content(version, content_db.rows_from_raw(rounds))
+    return show
+
+
+def delete_round(
+    db: Database,
+    round_id: str,
+    *,
+    valid_zone_ids: Optional[set[str]] = None,
+) -> ShowContent:
+    """Remove one round from the stored show and write it back.
+
+    Raises ContentError for an unknown round id or if the resulting show
+    fails validation (rows unchanged) — e.g. this was the last remaining
+    reference some other check depended on.
+    """
+    version, rows = db.load_content()
+    rounds = [content_db.row_to_raw(r) for r in rows]
+    remaining = [r for r in rounds if r["id"] != round_id]
+    if len(remaining) == len(rounds):
+        raise ContentError(f"unknown round {round_id!r}")
+
+    raw: dict = {"rounds": remaining}
+    if version:
+        raw["version"] = version
+    show = validate_show(
+        raw, valid_zone_ids=valid_zone_ids, source="edited show content (database)"
+    )
+    db.save_content(version, content_db.rows_from_raw(remaining))
+    return show

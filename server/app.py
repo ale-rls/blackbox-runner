@@ -340,6 +340,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         updated = next(r for r in show.rounds if r.id == round_id)
         return {"ok": True, "reloaded": reloaded, "detail": detail, "round": updated.model_dump()}
 
+    @app.post("/api/admin/content/rounds")
+    async def create_round(body: dict) -> dict:
+        new_round = body.get("round")
+        after_id = body.get("after_id")
+        if not isinstance(new_round, dict):
+            raise HTTPException(status_code=400, detail="body must include a 'round' object")
+        try:
+            show = await asyncio.to_thread(
+                show_store.create_round,
+                db,
+                new_round,
+                after_id=after_id,
+                valid_zone_ids=_edit_zone_ids(),
+            )
+        except ContentError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        reloaded, detail = _reload_engine(show)
+        created = next(r for r in show.rounds if r.id == new_round["id"])
+        return {"ok": True, "reloaded": reloaded, "detail": detail, "round": created.model_dump()}
+
+    @app.delete("/api/admin/content/rounds/{round_id}")
+    async def delete_round(round_id: str) -> dict:
+        try:
+            show = await asyncio.to_thread(
+                show_store.delete_round,
+                db,
+                round_id,
+                valid_zone_ids=_edit_zone_ids(),
+            )
+        except ContentError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        reloaded, detail = _reload_engine(show)
+        return {"ok": True, "reloaded": reloaded, "detail": detail, "rounds": len(show.rounds)}
+
     @app.post("/api/admin/content/rounds/{round_id}/tts")
     async def generate_round_audio(round_id: str, body: Optional[TTSRequest] = None) -> dict:
         if not settings.elevenlabs_api_key:
