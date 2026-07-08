@@ -2,6 +2,7 @@
   import RoundPanel from "$lib/components/RoundPanel.svelte";
   import { audio, attachElement, unlockAudio, playAudio, roundAudioSrc } from "$lib/audio.svelte.js";
   import { gameFetch, gameWsUrl } from "$lib/config.js";
+  import { ensurePocketbaseUrl } from "$lib/pb.js";
   import { onMount } from "svelte";
 
   let round = $state(null);
@@ -162,30 +163,48 @@
 
   onMount(() => {
     reconnectEnabled = true;
-    void gameFetch("/api/rounds/current")
-      .then((resp) => (resp.ok ? resp.json() : null))
-      .then((current) => {
-        if (!current) return;
-        round = current;
-        if (current.state === "active") syncAudio(current);
-      })
-      .catch(() => {
-        // The websocket is the primary live path; the fetch is only a bootstrap.
-      });
 
-    void gameFetch("/api/scores")
-      .then((resp) => (resp.ok ? resp.json() : null))
-      .then((currentScores) => {
-        if (currentScores) scores = currentScores;
-      })
-      .catch(() => {
-        // Scoreboard is read-only on this page; keep going without it.
-      });
+    // Operator page: skip the tap-to-unlock dance and play outright. If the
+    // browser blocks autoplay anyway, playAudio re-arms the pending URL and
+    // the first gesture anywhere on the page retries it.
+    unlockAudio();
+    const retryUnlock = () => unlockAudio();
+    window.addEventListener("pointerdown", retryUnlock);
+    window.addEventListener("keydown", retryUnlock);
+    // Resolve PocketBase's base URL before touching any round data so
+    // narration always resolves to the PocketBase file URL, not the
+    // game-served /audio fallback. If it can't be resolved the fallback
+    // still plays in same-origin dev.
+    void ensurePocketbaseUrl()
+      .catch(() => {})
+      .then(() => {
+        void gameFetch("/api/rounds/current")
+          .then((resp) => (resp.ok ? resp.json() : null))
+          .then((current) => {
+            if (!current) return;
+            round = current;
+            if (current.state === "active") syncAudio(current);
+          })
+          .catch(() => {
+            // The websocket is the primary live path; the fetch is only a bootstrap.
+          });
 
-    connect();
+        void gameFetch("/api/scores")
+          .then((resp) => (resp.ok ? resp.json() : null))
+          .then((currentScores) => {
+            if (currentScores) scores = currentScores;
+          })
+          .catch(() => {
+            // Scoreboard is read-only on this page; keep going without it.
+          });
+
+        connect();
+      });
 
     return () => {
       reconnectEnabled = false;
+      window.removeEventListener("pointerdown", retryUnlock);
+      window.removeEventListener("keydown", retryUnlock);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       reconnectTimer = null;
       if (ws) ws.close();
@@ -240,7 +259,9 @@
         </div>
 
         <div class="hint">
-          The native player stays visible so you can pause, scrub, and confirm the loaded source.
+          Audio starts by itself when a round opens. If the browser blocks autoplay, click
+          anywhere on the page (or "Enable audio") once. The native player stays visible so you
+          can pause, scrub, and confirm the loaded source.
         </div>
       </article>
 

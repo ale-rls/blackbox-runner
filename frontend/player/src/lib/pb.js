@@ -10,30 +10,38 @@ import { POCKETBASE_URL, gameFetch } from "$lib/config.js";
 
 const q = (s) => "'" + String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
 
-// Shared instance so file URLs (and submitClaim) can be built anywhere once
-// connectPlayer() has resolved.
+// Shared instance so submitClaim can be used anywhere once connectPlayer()
+// has resolved.
 let pbInstance = null;
 
+// PocketBase's base URL, known immediately in a standalone build and
+// resolved once from the game server in same-origin dev. File URLs only
+// need this — not a live PocketBase connection.
+let pbBaseUrl = POCKETBASE_URL || null;
+
 /**
- * Absolute URL for a PocketBase-stored file, via the SDK's file API.
- * ``ref`` is the round payload's audio_file:
- * {collection, record_id, filename}. Null until connectPlayer() has
- * resolved (callers fall back to the game-served /audio URL, which only
- * exists in same-origin dev).
+ * Resolve (and cache) PocketBase's base URL. Pages that never call
+ * connectPlayer (the /listen route) call this so pbFileUrl can work.
  */
-export function pbFileUrl(ref) {
-  if (!ref || !pbInstance) return null;
-  return pbInstance.files.getURL(
-    { id: ref.record_id, collectionId: ref.collection, collectionName: ref.collection },
-    ref.filename,
-  );
+export async function ensurePocketbaseUrl() {
+  if (!pbBaseUrl) {
+    // Same-origin dev: the game server serves the page and can hand us the URL.
+    const cfg = await gameFetch("/api/config").then((r) => r.json());
+    pbBaseUrl = cfg.pocketbase_url;
+  }
+  return pbBaseUrl;
 }
 
-async function resolvePocketbaseUrl() {
-  if (POCKETBASE_URL) return POCKETBASE_URL;
-  // Same-origin dev: the game server serves the page and can hand us the URL.
-  const cfg = await gameFetch("/api/config").then((r) => r.json());
-  return cfg.pocketbase_url;
+/**
+ * Absolute URL for a PocketBase-stored file (the /api/files/... form).
+ * ``ref`` is the round payload's audio_file:
+ * {collection, record_id, filename}. Null until the base URL is known
+ * (callers fall back to the game-served /audio URL, which only exists in
+ * same-origin dev).
+ */
+export function pbFileUrl(ref) {
+  if (!ref || !pbBaseUrl) return null;
+  return `${pbBaseUrl}/api/files/${ref.collection}/${ref.record_id}/${encodeURIComponent(ref.filename)}`;
 }
 
 /**
@@ -57,7 +65,7 @@ export async function connectPlayer({
   onScore,
   onAvailable,
 }) {
-  const pb = new PocketBase(await resolvePocketbaseUrl());
+  const pb = new PocketBase(await ensurePocketbaseUrl());
   pbInstance = pb;
 
   // Active session id + claimable GIDs live on the game_state singleton.

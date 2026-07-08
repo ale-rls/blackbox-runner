@@ -181,6 +181,11 @@ class CueRequest(BaseModel):
     payload: dict = {}
 
 
+class StartRoundRequest(BaseModel):
+    # Omitted -> start the next round; set -> jump the show to that step.
+    index: Optional[int] = None
+
+
 class TTSRequest(BaseModel):
     voice_id: Optional[str] = None
 
@@ -422,6 +427,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.show = show
         return True, None
 
+    def _pb_audio_url(round_id: str) -> Optional[str]:
+        """Public URL of a round's narration mp3 stored in PocketBase
+        (…/api/files/content_rounds/{record}/{filename}), or None if the
+        file was never uploaded there."""
+        info = db.content_file_info(round_id)
+        if not info:
+            return None
+        return f"{settings.pocketbase_url}/api/files/content_rounds/{info[0]}/{info[1]}"
+
     @app.get("/api/admin/content")
     async def get_content() -> dict:
         try:
@@ -432,8 +446,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         rounds = []
         for r in show.rounds:
             dump = r.model_dump()
-            dump["audio_url"] = f"/audio/{r.audio}" if r.audio else None
-            dump["audio_exists"] = bool(r.audio) and (audio_dir / r.audio).is_file()
+            # The canonical audio location is the PocketBase file; the
+            # game-served /audio path is only a fallback for rounds whose
+            # mp3 never made it into PocketBase.
+            dump["audio_url"] = _pb_audio_url(r.id) or (
+                f"/audio/{r.audio}" if r.audio else None
+            )
+            dump["audio_exists"] = bool(db.content_file_info(r.id)) or (
+                bool(r.audio) and (audio_dir / r.audio).is_file()
+            )
             rounds.append(dump)
         return {
             "version": show.version,
@@ -544,16 +565,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {
             "ok": True,
             "audio": filename,
-            "audio_url": f"/audio/{filename}",
+            "audio_url": _pb_audio_url(round_id) or f"/audio/{filename}",
             "bytes": len(audio_bytes),
             "reloaded": reloaded,
             "detail": detail,
         }
 
     @app.post("/api/admin/rounds/start")
-    async def start_round() -> dict:
+    async def start_round(body: Optional[StartRoundRequest] = None) -> dict:
         try:
-            rt = await app.state.engine.start_next_round()
+            if body is not None and body.index is not None:
+                rt = await app.state.engine.start_round_at(body.index)
+            else:
+                rt = await app.state.engine.start_next_round()
         except EngineError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return app.state.engine.round_payload(rt)

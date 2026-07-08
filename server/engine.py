@@ -226,8 +226,22 @@ class GameEngine:
             raise EngineError("a round is already in progress")
         if not self.has_more_rounds:
             raise EngineError("no more rounds in this show")
+        return await self._start_round(self._index + 1)
 
-        self._index += 1
+    async def start_round_at(self, index: int) -> RoundRuntime:
+        """Jump the show to an arbitrary step (operator skip). Subsequent
+        ``start_next_round`` calls continue from the new position."""
+        if self._current is not None and self._current.state != RoundState.DONE:
+            raise EngineError("a round is already in progress")
+        if not 0 <= index < len(self.show.rounds):
+            raise EngineError(
+                f"round index {index} is out of range "
+                f"(show has {len(self.show.rounds)} round(s))"
+            )
+        return await self._start_round(index)
+
+    async def _start_round(self, index: int) -> RoundRuntime:
+        self._index = index
         content = self.show.rounds[self._index]
         row_id = await self._db.create_round(self.session_id, self._index, content.id)
         rt = RoundRuntime(content=content, row_id=row_id, index=self._index)

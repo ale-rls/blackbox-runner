@@ -104,11 +104,12 @@
     button.ghost { color: var(--muted); }
     button.small { font-size: 0.8rem; padding: 0.3em 0.7em; }
     button.ritual { border-color: rgba(251, 191, 36, 0.4); color: var(--amber); }
-    input[type="text"], input:not([type]) , input[type="number"], textarea {
+    input[type="text"], input:not([type]) , input[type="number"], textarea, select {
       font: inherit; background: var(--panel-2); color: var(--text);
       border: 1px solid var(--border); border-radius: 0.45rem; padding: 0.4em 0.6em;
     }
-    input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
+    #skip-select { max-width: 18rem; }
     textarea { resize: vertical; line-height: 1.5; }
     .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
@@ -260,6 +261,8 @@
         <button id="btn-close">Close</button>
         <button id="btn-reveal">Reveal</button>
         <span class="spacer"></span>
+        <select id="skip-select" title="Jump the show to this step"></select>
+        <button id="btn-skip">Skip to</button>
         <button class="ghost" id="btn-reload">Reload content</button>
       </div>
     </section>
@@ -626,6 +629,31 @@
     $("btn-start").addEventListener("click", () => roundAction("start", "Round started"));
     $("btn-close").addEventListener("click", () => roundAction("close", "Round closed — grace window running"));
     $("btn-reveal").addEventListener("click", () => roundAction("reveal", "Revealed"));
+    $("btn-skip").addEventListener("click", async () => {
+      const value = $("skip-select").value;
+      if (value === "") { toast("No rounds loaded to skip to", true); return; }
+      const index = Number(value);
+      try {
+        await post("/api/admin/rounds/start", { index });
+        toast(`Jumped to step ${index + 1}`);
+      } catch (err) {
+        toast(err.message, true);
+      }
+      refreshRound();
+    });
+
+    function renderSkipSelect() {
+      const sel = $("skip-select");
+      const previous = sel.value;
+      if (!showContent || !showContent.rounds.length) { sel.innerHTML = ""; return; }
+      sel.innerHTML = showContent.rounds
+        .map((r, i) => {
+          const q = r.question.length > 40 ? `${r.question.slice(0, 40)}…` : r.question;
+          return `<option value="${i}">${i + 1}. ${esc(r.id)} — ${esc(q)}</option>`;
+        })
+        .join("");
+      if (previous !== "" && Number(previous) < showContent.rounds.length) sel.value = previous;
+    }
     $("btn-reload").addEventListener("click", async () => {
       try {
         const res = await post("/api/admin/content/reload");
@@ -771,8 +799,10 @@
         }
         showContent = await resp.json();
         renderEditor();
+        renderSkipSelect();
       } catch (err) {
         showContent = null;
+        renderSkipSelect();
         $("editor-rows").innerHTML = "";
         const empty = $("editor-empty");
         empty.style.display = "block";
