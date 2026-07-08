@@ -35,6 +35,10 @@ _GAME_COLLECTIONS = (
     "score_events",
     "content_meta",
     "content_rounds",
+    # issue #16: the deployed phone's PocketBase-only bridge.
+    "game_state",
+    "claim_requests",
+    "player_reveals",
 )
 
 

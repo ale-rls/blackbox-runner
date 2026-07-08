@@ -38,7 +38,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 
 import httpx
 
@@ -175,6 +175,13 @@ class PocketBaseClient:
         # round_id -> (record id, stored audio filename) for the player
         # frontend's pb.files.getURL(); fed by load/save_content.
         self._content_files: dict[str, tuple[str, str]] = {}
+        # player_reveals upsert emulation, same pattern as answers.
+        self._reveal_ids: dict[tuple[str, str], str] = {}
+        # game_state singleton: cached record id + last-published gid list so
+        # publish_available_gids is a no-op when nothing changed.
+        self._game_state_id: Optional[str] = None
+        self._last_available_gids: Optional[list[int]] = None
+        self._last_session_id: Optional[str] = None
 
     # ------------------------------------------------------------------ #
     # Connection / auth
@@ -440,10 +447,17 @@ class PocketBaseClient:
         state: str,
         opened_at: Optional[float],
         closed_at: Optional[float],
+        payload: Optional[dict] = None,
     ) -> None:
-        await self._update(
-            "rounds", round_id, {"state": state, "opened_at": opened_at, "closed_at": closed_at}
-        )
+        """Persist a round-state transition. When ``payload`` is given it's
+        written in the *same* PATCH — the full player-facing round payload
+        denormalized onto the public ``rounds`` record, so the deployed phone
+        gets state + content in one realtime event with no join against
+        superuser-only content, and no intermediate flicker."""
+        body: dict = {"state": state, "opened_at": opened_at, "closed_at": closed_at}
+        if payload is not None:
+            body["payload"] = payload
+        await self._update("rounds", round_id, body)
 
     async def load_rounds(self, session_id: str) -> list[RoundRow]:
         records = await self._list_all("rounds", filter_=f"session={_q(session_id)}", sort="idx")
@@ -507,6 +521,45 @@ class PocketBaseClient:
             )
             for r in records
         ]
+
+    # ------------------------------------------------------------------ #
+    # Player reveals (public per-player projection of one's own answer)
+    # ------------------------------------------------------------------ #
+    async def record_player_reveal(
+        self,
+        session_id: str,
+        round_id: str,
+        player_id: str,
+        zone: Optional[str],
+        resolved: str,
+    ) -> None:
+        """Upsert a player's own answer for a revealed round into the public
+        ``player_reveals`` projection (unique on round+player), so the phone
+        can show "you were here" without the private ``answers`` table being
+        readable."""
+        body = {
+            "session": session_id,
+            "round": round_id,
+            "player_key": player_id,
+            "zone": zone or "",
+            "resolved": resolved,
+            "at": time.time(),
+        }
+        key = (round_id, player_id)
+        pb_id = self._reveal_ids.get(key)
+        if pb_id is None:
+            found = await self._list_all(
+                "player_reveals",
+                filter_=f"round={_q(round_id)} && player_key={_q(player_id)}",
+            )
+            if found:
+                pb_id = found[0]["id"]
+                self._reveal_ids[key] = pb_id
+        if pb_id is not None:
+            await self._update("player_reveals", pb_id, body)
+        else:
+            rec = await self._create("player_reveals", body)
+            self._reveal_ids[key] = rec["id"]
 
     # ------------------------------------------------------------------ #
     # Score events (scores are always a sum over events, never a counter)
@@ -742,3 +795,97 @@ class PocketBaseClient:
             raise PocketBaseError(
                 f"content save incomplete: expected {len(rows)} round(s), found {total}"
             )
+
+    # ------------------------------------------------------------------ #
+    # Realtime bridge to the deployed phone (issue #16)
+    #
+    # The player frontend is hosted on the public web and has no route to
+    # the venue game server; it talks only to PocketBase. These methods are
+    # the server's half of that bridge: publish the claimable-GID list,
+    # consume claim submissions over the realtime stream, and write results
+    # back where the phone can subscribe to them.
+    # ------------------------------------------------------------------ #
+    async def publish_available_gids(self, session_id: str, gids: list[int]) -> None:
+        """Rewrite the ``game_state`` singleton: the active session id (so the
+        phone can scope its records to the current show) and the claimable-GID
+        list. No-op when nothing changed, so the phone's realtime subscription
+        only fires on a genuine change (a GID appearing or being claimed)."""
+        normalized = sorted({int(g) for g in gids})
+        if normalized == self._last_available_gids and self._last_session_id == session_id:
+            return
+        body = {
+            "session_id": session_id,
+            "available_gids": normalized,
+            "updated_at": time.time(),
+        }
+        if self._game_state_id is None:
+            found = await self._list_all("game_state")
+            if found:
+                self._game_state_id = found[0]["id"]
+        if self._game_state_id is not None:
+            await self._update("game_state", self._game_state_id, body)
+        else:
+            rec = await self._create("game_state", body)
+            self._game_state_id = rec["id"]
+        self._last_available_gids = normalized
+        self._last_session_id = session_id
+
+    async def load_pending_claim_requests(self) -> list[dict]:
+        """Claim rows the server hasn't resolved yet (status empty/pending).
+        Used to catch up on (re)connect so a submission made while the
+        realtime stream was down is never dropped. The collection holds one
+        short-lived row per onboarding tap, so listing it is cheap."""
+        records = await self._list_all("claim_requests", sort="at")
+        return [r for r in records if (r.get("status") or "pending") == "pending"]
+
+    async def resolve_claim_request(
+        self, request_id: str, status: str, detail: str = ""
+    ) -> None:
+        await self._update(
+            "claim_requests", request_id, {"status": status, "detail": detail or ""}
+        )
+
+    async def realtime_events(
+        self, collections: list[str]
+    ) -> AsyncIterator[tuple[str, str, dict]]:
+        """Yield ``(collection, action, record)`` for one PocketBase realtime
+        connection, following the SSE handshake: read the ``PB_CONNECT``
+        message for a client id, POST the subscription list, then stream
+        change events. Returns when the stream closes or errors — the caller
+        reconnects (and re-runs a catch-up) so this stays a single-connection
+        generator with no retry logic of its own."""
+        if self._token is None:
+            await self._authenticate()
+        headers = {"Accept": "text/event-stream", "Authorization": self._token or ""}
+        # No read timeout: an idle SSE stream is healthy, not stalled.
+        timeout = httpx.Timeout(None, connect=10.0)
+        async with self._http.stream(
+            "GET", "/api/realtime", headers=headers, timeout=timeout
+        ) as resp:
+            resp.raise_for_status()
+            event_name = ""
+            data_lines: list[str] = []
+            async for line in resp.aiter_lines():
+                if line == "":  # blank line dispatches the accumulated event
+                    if data_lines:
+                        payload = "\n".join(data_lines)
+                        if event_name == "PB_CONNECT":
+                            client_id = _json.loads(payload).get("clientId")
+                            await self._request(
+                                "POST",
+                                "/api/realtime",
+                                json={"clientId": client_id, "subscriptions": list(collections)},
+                            )
+                        elif event_name in collections:
+                            data = _json.loads(payload)
+                            yield event_name, data.get("action", ""), data.get("record") or {}
+                    event_name = ""
+                    data_lines = []
+                    continue
+                field, _, value = line.partition(":")
+                if value.startswith(" "):
+                    value = value[1:]
+                if field == "event":
+                    event_name = value
+                elif field == "data":
+                    data_lines.append(value)

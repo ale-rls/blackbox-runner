@@ -36,6 +36,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("blackbox_runner.app")
 
 _POSITION_LOG_INTERVAL_S = 5.0
+# How often the server recomputes the claimable-GID list from in-memory
+# tracking/binding state. It only writes to PocketBase when the set actually
+# changed (publish_available_gids dedupes), so the phone's realtime
+# subscription still only fires on a real change; this is just the recompute
+# cadence, not a network poll.
+_AVAILABLE_GIDS_INTERVAL_S = 1.0
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 _PLAYER_BUILD = Path(__file__).resolve().parent.parent / "frontend" / "player" / "build"
 
@@ -78,6 +84,89 @@ async def _watch_for_ritual_prompts(
         bindings.unsubscribe(queue)
 
 
+async def _publish_available_gids(
+    db: PocketBaseClient,
+    bindings: BindingManager,
+    tracking: TrackingClient,
+    session_id: str,
+) -> None:
+    """Keep PocketBase's ``game_state.available_gids`` in sync with the GIDs
+    that are tracked but unbound — the numbers a phone is allowed to claim
+    (issue #16). The deployed player frontend, which can't reach this server,
+    subscribes to that list over PocketBase realtime.
+
+    Recompute is cheap (in-memory state) and the write is a no-op when the
+    set is unchanged, so the phone only ever sees genuine changes.
+    """
+    while True:
+        try:
+            bound = bindings.bound_gids()
+            available = [
+                gid
+                for gid, state in tracking.get_all().items()
+                if state.visible and gid not in bound
+            ]
+            await db.publish_available_gids(session_id, available)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Failed to publish available_gids")
+        await asyncio.sleep(_AVAILABLE_GIDS_INTERVAL_S)
+
+
+async def _process_claim_request(
+    db: PocketBaseClient, bindings: BindingManager, record: dict
+) -> None:
+    """Perform one claim submitted by a phone through PocketBase, then write
+    the outcome back onto its ``claim_requests`` row so the phone (watching
+    that row) sees success or the exact error. Idempotent: a request already
+    satisfied resolves as done rather than tripping the already-bound guard,
+    so a redelivered realtime event or a reconnect catch-up is harmless."""
+    request_id = record.get("id")
+    if not request_id:
+        return
+    player_key = record.get("player_key") or ""
+    display_name = record.get("display_name") or None
+    try:
+        gid = int(record.get("gid"))
+    except (TypeError, ValueError):
+        await db.resolve_claim_request(request_id, "error", "Ungültige Nummer")
+        return
+
+    existing = bindings.get(player_key)
+    if existing is not None and existing.state == PlayerState.BOUND and existing.gid == gid:
+        await db.resolve_claim_request(request_id, "done", "")
+        return
+    try:
+        await bindings.claim(player_key, gid, display_name)
+    except BindingError as exc:
+        await db.resolve_claim_request(request_id, "error", str(exc))
+        return
+    await db.resolve_claim_request(request_id, "done", "")
+
+
+async def _consume_claim_requests(db: PocketBaseClient, bindings: BindingManager) -> None:
+    """Bridge the phone's PocketBase claim submissions to the real binding
+    layer. Each pass catches up on anything still pending (covering rows
+    created while the realtime stream was down), then follows the realtime
+    stream for new ones. On any stream error it reconnects and catches up
+    again, so no submission is lost."""
+    while True:
+        try:
+            for record in await db.load_pending_claim_requests():
+                await _process_claim_request(db, bindings, record)
+            async for _coll, action, record in db.realtime_events(["claim_requests"]):
+                if action in ("create", "update") and (
+                    record.get("status") or "pending"
+                ) == "pending":
+                    await _process_claim_request(db, bindings, record)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("Claim-request consumer error; reconnecting: %s", exc)
+            await asyncio.sleep(1.0)
+
+
 class ClaimRequest(BaseModel):
     gid: int
     display_name: Optional[str] = None
@@ -90,6 +179,11 @@ class RebindRequest(BaseModel):
 
 class CueRequest(BaseModel):
     payload: dict = {}
+
+
+class StartRoundRequest(BaseModel):
+    # Omitted -> start the next round; set -> jump the show to that step.
+    index: Optional[int] = None
 
 
 class TTSRequest(BaseModel):
@@ -170,13 +264,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ritual_task = asyncio.create_task(
             _watch_for_ritual_prompts(bindings, app.state.engine, settings.ritual_zone_id)
         )
+        # Issue #16: the deployed phone reaches only PocketBase, so the server
+        # publishes the claimable-GID list there and consumes claim
+        # submissions back off the realtime stream.
+        gids_task = asyncio.create_task(
+            _publish_available_gids(db, bindings, tracking, session_id)
+        )
+        claim_task = asyncio.create_task(_consume_claim_requests(db, bindings))
         try:
             yield
         finally:
             tracking.stop()
             app.state.engine.shutdown()
             bindings.shutdown()
-            for task in (tracking_task, bindings_task, log_task, ritual_task):
+            for task in (
+                tracking_task, bindings_task, log_task, ritual_task, gids_task, claim_task
+            ):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
@@ -324,6 +427,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.show = show
         return True, None
 
+    def _pb_audio_url(round_id: str) -> Optional[str]:
+        """Public URL of a round's narration mp3 stored in PocketBase
+        (…/api/files/content_rounds/{record}/{filename}), or None if the
+        file was never uploaded there."""
+        info = db.content_file_info(round_id)
+        if not info:
+            return None
+        return f"{settings.pocketbase_url}/api/files/content_rounds/{info[0]}/{info[1]}"
+
     @app.get("/api/admin/content")
     async def get_content() -> dict:
         try:
@@ -334,8 +446,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         rounds = []
         for r in show.rounds:
             dump = r.model_dump()
-            dump["audio_url"] = f"/audio/{r.audio}" if r.audio else None
-            dump["audio_exists"] = bool(r.audio) and (audio_dir / r.audio).is_file()
+            # The canonical audio location is the PocketBase file; the
+            # game-served /audio path is only a fallback for rounds whose
+            # mp3 never made it into PocketBase.
+            dump["audio_url"] = _pb_audio_url(r.id) or (
+                f"/audio/{r.audio}" if r.audio else None
+            )
+            dump["audio_exists"] = bool(db.content_file_info(r.id)) or (
+                bool(r.audio) and (audio_dir / r.audio).is_file()
+            )
             rounds.append(dump)
         return {
             "version": show.version,
@@ -446,16 +565,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {
             "ok": True,
             "audio": filename,
-            "audio_url": f"/audio/{filename}",
+            "audio_url": _pb_audio_url(round_id) or f"/audio/{filename}",
             "bytes": len(audio_bytes),
             "reloaded": reloaded,
             "detail": detail,
         }
 
     @app.post("/api/admin/rounds/start")
-    async def start_round() -> dict:
+    async def start_round(body: Optional[StartRoundRequest] = None) -> dict:
         try:
-            rt = await app.state.engine.start_next_round()
+            if body is not None and body.index is not None:
+                rt = await app.state.engine.start_round_at(body.index)
+            else:
+                rt = await app.state.engine.start_next_round()
         except EngineError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return app.state.engine.round_payload(rt)
