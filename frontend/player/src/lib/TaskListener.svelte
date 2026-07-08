@@ -1,22 +1,17 @@
 <script>
   import RoundPanel from "$lib/components/RoundPanel.svelte";
   import { audio, attachElement, unlockAudio, playAudio, roundAudioSrc } from "$lib/audio.svelte.js";
-  import { gameFetch, gameWsUrl } from "$lib/config.js";
-  import { ensurePocketbaseUrl } from "$lib/pb.js";
+  import { connectListener } from "$lib/pb.js";
   import { onMount } from "svelte";
 
   let round = $state(null);
   let reveal = $state(null);
   let zoneCounts = $state({});
   let scores = $state({});
-  let zones = $state(null);
   let connected = $state(false);
   let lastCue = $state("waiting");
   let lastUpdatedAt = $state(null);
   let narrationEl = $state(null);
-  let ws = null;
-  let reconnectTimer = null;
-  let reconnectEnabled = false;
   let autoPlayedRoundId = null;
 
   $effect(() => {
@@ -45,7 +40,7 @@
   );
   const summaryRows = $derived.by(() => {
     const rows = [
-      { label: "Connection", value: connected ? "Live" : "Reconnecting" },
+      { label: "Connection", value: connected ? "Live" : "Connecting" },
       { label: "Last cue", value: lastCue || "waiting" },
       { label: "Round", value: round?.round_id || "Waiting for a round" },
       { label: "State", value: round?.state || "idle" },
@@ -74,7 +69,6 @@
     reveal,
     zoneCounts,
     scores,
-    zones,
   }));
 
   function formatClock(ts) {
@@ -107,63 +101,24 @@
     playAudio(src);
   }
 
-  function applyMessage(msg) {
-    if (!msg?.type) return;
-    markActivity(msg.type);
-
-    if (msg.type === "hello") {
-      connected = true;
-      round = msg.round;
-      reveal = null;
-      zoneCounts = msg.zone_counts || {};
-      zones = msg.zones || null;
-      syncAudio(msg.round);
-    } else if (msg.type === "round_opened") {
-      round = msg;
-      reveal = null;
-      syncAudio(msg);
-    } else if (msg.type === "round_closing" || msg.type === "answers_locked") {
-      round = msg;
-    } else if (msg.type === "reveal") {
-      round = msg;
-      reveal = msg;
-    } else if (msg.type === "scores_updated") {
-      scores = msg.scores || {};
-    } else if (msg.type === "zone_counts") {
-      zoneCounts = msg.counts || {};
-    } else if (msg.type === "ritual_prompt") {
-      // The listener route is cue-aware but not player-aware.
-    }
-  }
-
-  function connect() {
-    ws = new WebSocket(gameWsUrl("/ws/td"));
-    ws.onopen = () => {
-      connected = true;
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
+  function applyRound(payload) {
+    // One rounds record carries the whole lifecycle; name the cue after the
+    // state transition so "Last cue" keeps reading like the old WS stream.
+    const cueByState = {
+      active: "round_opened",
+      closing: "round_closing",
+      revealed: "reveal",
+      done: "round_done",
     };
-    ws.onmessage = (evt) => {
-      applyMessage(JSON.parse(evt.data));
-    };
-    ws.onerror = () => {
-      connected = false;
-    };
-    ws.onclose = () => {
-      connected = false;
-      if (!reconnectEnabled) return;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      reconnectTimer = setTimeout(() => {
-        if (reconnectEnabled) connect();
-      }, 1500);
-    };
+    markActivity(cueByState[payload.state] || payload.state);
+    round = payload;
+    reveal = payload.state === "revealed" ? payload : null;
+    // The final tally is more accurate than the last live headcount sample.
+    if (reveal?.tally) zoneCounts = reveal.tally;
+    syncAudio(payload);
   }
 
   onMount(() => {
-    reconnectEnabled = true;
-
     // Operator page: skip the tap-to-unlock dance and play outright. If the
     // browser blocks autoplay anyway, playAudio re-arms the pending URL and
     // the first gesture anywhere on the page retries it.
@@ -171,43 +126,34 @@
     const retryUnlock = () => unlockAudio();
     window.addEventListener("pointerdown", retryUnlock);
     window.addEventListener("keydown", retryUnlock);
-    // Resolve PocketBase's base URL before touching any round data so
-    // narration always resolves to the PocketBase file URL, not the
-    // game-served /audio fallback. If it can't be resolved the fallback
-    // still plays in same-origin dev.
-    void ensurePocketbaseUrl()
-      .catch(() => {})
+
+    // PocketBase realtime is the only backend here (issue #16): rounds,
+    // score_events and live_stats subscriptions replace the old /ws/td
+    // WebSocket, so the deployed page needs no route to the game server.
+    // The SDK auto-reconnects its SSE stream, so "connected" only tracks
+    // whether the initial subscription handshake succeeded.
+    connectListener({
+      onRound: applyRound,
+      onScores: (totals) => {
+        markActivity("scores_updated");
+        scores = totals;
+      },
+      onZoneCounts: (counts) => {
+        markActivity("zone_counts");
+        zoneCounts = counts;
+      },
+    })
       .then(() => {
-        void gameFetch("/api/rounds/current")
-          .then((resp) => (resp.ok ? resp.json() : null))
-          .then((current) => {
-            if (!current) return;
-            round = current;
-            if (current.state === "active") syncAudio(current);
-          })
-          .catch(() => {
-            // The websocket is the primary live path; the fetch is only a bootstrap.
-          });
-
-        void gameFetch("/api/scores")
-          .then((resp) => (resp.ok ? resp.json() : null))
-          .then((currentScores) => {
-            if (currentScores) scores = currentScores;
-          })
-          .catch(() => {
-            // Scoreboard is read-only on this page; keep going without it.
-          });
-
-        connect();
+        connected = true;
+      })
+      .catch(() => {
+        // Connect failure must not throw out of onMount and blank the page;
+        // the chip just stays on "Connecting".
       });
 
     return () => {
-      reconnectEnabled = false;
       window.removeEventListener("pointerdown", retryUnlock);
       window.removeEventListener("keydown", retryUnlock);
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-      if (ws) ws.close();
     };
   });
 </script>
@@ -274,12 +220,6 @@
               <div class="meta-value">{row.value}</div>
             </div>
           {/each}
-          <div class="meta">
-            <div class="meta-label">Tracking zones</div>
-            <div class="meta-value">
-              {zones?.enabled ? `${zones.zones?.length || 0} active` : "disabled"}
-            </div>
-          </div>
           <div class="meta">
             <div class="meta-label">Audio source</div>
             <div class="meta-value">{round?.audio_url || "none"}</div>

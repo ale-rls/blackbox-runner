@@ -182,6 +182,9 @@ class PocketBaseClient:
         self._game_state_id: Optional[str] = None
         self._last_available_gids: Optional[list[int]] = None
         self._last_session_id: Optional[str] = None
+        # live_stats singleton, same no-op-on-unchanged pattern.
+        self._live_stats_id: Optional[str] = None
+        self._last_zone_counts: Optional[tuple[str, tuple[tuple[str, int], ...]]] = None
 
     # ------------------------------------------------------------------ #
     # Connection / auth
@@ -829,6 +832,33 @@ class PocketBaseClient:
             self._game_state_id = rec["id"]
         self._last_available_gids = normalized
         self._last_session_id = session_id
+
+    async def publish_zone_counts(
+        self, session_id: str, round_id: Optional[str], counts: dict[str, int]
+    ) -> None:
+        """Rewrite the ``live_stats`` singleton with the live per-zone
+        headcount (the same numbers the engine streams to /ws/td). No-op when
+        nothing changed, so the /listen page's realtime subscription only
+        fires when someone actually moves between zones."""
+        key = (round_id or "", tuple(sorted(counts.items())))
+        if key == self._last_zone_counts:
+            return
+        body = {
+            "session_id": session_id,
+            "round_id": round_id or "",
+            "zone_counts": counts,
+            "updated_at": time.time(),
+        }
+        if self._live_stats_id is None:
+            found = await self._list_all("live_stats")
+            if found:
+                self._live_stats_id = found[0]["id"]
+        if self._live_stats_id is not None:
+            await self._update("live_stats", self._live_stats_id, body)
+        else:
+            rec = await self._create("live_stats", body)
+            self._live_stats_id = rec["id"]
+        self._last_zone_counts = key
 
     async def load_pending_claim_requests(self) -> list[dict]:
         """Claim rows the server hasn't resolved yet (status empty/pending).

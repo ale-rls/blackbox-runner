@@ -39,6 +39,8 @@ _GAME_COLLECTIONS = (
     "game_state",
     "claim_requests",
     "player_reveals",
+    # live zone counts for the PocketBase-only /listen page
+    "live_stats",
 )
 
 

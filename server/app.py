@@ -114,6 +114,39 @@ async def _publish_available_gids(
         await asyncio.sleep(_AVAILABLE_GIDS_INTERVAL_S)
 
 
+async def _publish_zone_counts(
+    db: PocketBaseClient, engine: GameEngine, session_id: str
+) -> None:
+    """Mirror the live per-zone headcount into PocketBase's ``live_stats``
+    singleton so the deployed /listen page — which can't reach this server's
+    /ws/td stream — still gets the moving zone-count bars. Same
+    recompute-then-deduped-write shape as _publish_available_gids: the write
+    is a no-op until someone actually changes zone.
+
+    Logs once per failure streak, not per attempt: live_stats is missing
+    entirely on instances whose pocketbase_bootstrap.py predates it, and a
+    traceback every second would drown the show logs."""
+    failing = False
+    while True:
+        try:
+            rt = engine.current
+            round_id = rt.content.id if rt is not None else None
+            await db.publish_zone_counts(
+                session_id, round_id, engine.current_zone_counts()
+            )
+            failing = False
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if not failing:
+                log.exception(
+                    "Failed to publish zone_counts (has scripts/"
+                    "pocketbase_bootstrap.py been run since live_stats was added?)"
+                )
+                failing = True
+        await asyncio.sleep(_AVAILABLE_GIDS_INTERVAL_S)
+
+
 async def _process_claim_request(
     db: PocketBaseClient, bindings: BindingManager, record: dict
 ) -> None:
@@ -271,6 +304,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             _publish_available_gids(db, bindings, tracking, session_id)
         )
         claim_task = asyncio.create_task(_consume_claim_requests(db, bindings))
+        zone_counts_task = asyncio.create_task(
+            _publish_zone_counts(db, app.state.engine, session_id)
+        )
         try:
             yield
         finally:
@@ -278,7 +314,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.engine.shutdown()
             bindings.shutdown()
             for task in (
-                tracking_task, bindings_task, log_task, ritual_task, gids_task, claim_task
+                tracking_task, bindings_task, log_task, ritual_task, gids_task,
+                claim_task, zone_counts_task,
             ):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

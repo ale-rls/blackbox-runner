@@ -163,6 +163,86 @@ export async function connectPlayer({
 }
 
 /**
+ * Connect the /listen (operator/debug) page: like connectPlayer but with no
+ * player seat — it watches the whole show instead of one phone's slice.
+ *
+ *   onRound(payload)          current round (rounds.payload; at reveal the
+ *                             same payload carries tally + winning_zones)
+ *   onScores({playerId: n})   full scoreboard, summed from score_events
+ *   onZoneCounts(counts)      live per-zone headcount from the live_stats
+ *                             singleton the game server mirrors out of its
+ *                             /ws/td stream (absent until the collection is
+ *                             bootstrapped — the page degrades to the tally)
+ *
+ * Returns the PocketBase instance.
+ */
+export async function connectListener({ onRound, onScores, onZoneCounts }) {
+  const pb = new PocketBase(await ensurePocketbaseUrl());
+
+  // Active session id first, so round/score reads scope to the current show.
+  let sessionId = null;
+  try {
+    const rows = await pb.collection("game_state").getFullList({ sort: "-updated_at" });
+    if (rows[0]?.session_id) sessionId = rows[0].session_id;
+  } catch {
+    // No game_state yet (fresh instance): show everything unscoped.
+  }
+
+  const inSession = (rec) => !sessionId || !rec.session || rec.session === sessionId;
+
+  let currentIdx = -1;
+  const applyRound = (rec) => {
+    if (!rec || !rec.payload || !inSession(rec)) return;
+    if (typeof rec.idx === "number" && rec.idx < currentIdx) return; // ignore stale older rounds
+    if (typeof rec.idx === "number") currentIdx = rec.idx;
+    onRound && onRound(rec.payload);
+  };
+  try {
+    const filter = sessionId ? `session=${q(sessionId)}` : "";
+    const rows = await pb.collection("rounds").getFullList({ filter, sort: "-idx" });
+    if (rows[0]) applyRound(rows[0]);
+  } catch {
+    // no round opened yet
+  }
+  pb.collection("rounds").subscribe("*", (e) => applyRound(e.record));
+
+  // Whole-show scoreboard: initial sums via REST, then live increments.
+  const totals = {};
+  const bump = (rec) => {
+    totals[rec.player_key] = (totals[rec.player_key] || 0) + (rec.points || 0);
+  };
+  try {
+    const filter = sessionId ? `session=${q(sessionId)}` : "";
+    for (const ev of await pb.collection("score_events").getFullList({ filter })) bump(ev);
+    onScores && onScores({ ...totals });
+  } catch {
+    // scoreboard is cosmetic on this page — never block on it
+  }
+  pb.collection("score_events").subscribe("*", (e) => {
+    if (e.action !== "create" || !inSession(e.record)) return;
+    bump(e.record);
+    onScores && onScores({ ...totals });
+  });
+
+  // Live zone counts. Guarded separately: live_stats only exists once
+  // scripts/pocketbase_bootstrap.py has run against this instance.
+  const applyStats = (rec) => {
+    if (!rec) return;
+    if (sessionId && rec.session_id && rec.session_id !== sessionId) return;
+    onZoneCounts && onZoneCounts(rec.zone_counts || {});
+  };
+  try {
+    const rows = await pb.collection("live_stats").getFullList({ sort: "-updated_at" });
+    applyStats(rows[0]);
+  } catch {
+    // collection missing or empty — bars stay on the reveal tally
+  }
+  pb.collection("live_stats").subscribe("*", (e) => applyStats(e.record)).catch(() => {});
+
+  return pb;
+}
+
+/**
  * Submit a claim: create a public claim_requests row, then wait for the game
  * server (which consumes the collection over realtime) to resolve it. Resolves
  * on success; rejects with the server's message on failure. The player's own

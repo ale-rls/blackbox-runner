@@ -229,6 +229,22 @@ def _collections(session_id: str, rounds_id: str) -> list[dict]:
             ],
             **PUBLIC_READ,
         },
+        {
+            # Singleton (one row) mirroring the live per-zone headcount the
+            # engine streams to /ws/td while a round is active. Only the
+            # /listen page subscribes to it — a separate collection (not a
+            # game_state field) so its ~1s update cadence never wakes the
+            # phones' game_state subscriptions.
+            "name": "live_stats",
+            "type": "base",
+            "fields": [
+                f("session_id", "text"),
+                f("round_id", "text"),
+                f("zone_counts", "json"),
+                f("updated_at", "number"),
+            ],
+            **PUBLIC_READ,
+        },
     ]
 
 
