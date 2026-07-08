@@ -4,7 +4,9 @@
 
   // `round` is the latest round payload from the game WS; `reveal` (when
   // set) is the reveal payload + the player's own answer.
-  let { round, reveal, yourAnswer } = $props();
+  // `showPersonalResult` lets the listener page reuse this view without
+  // showing an absent/wrong result when there is no player context.
+  let { round, reveal, yourAnswer, showPersonalResult = true } = $props();
 
   let now = $state(Date.now());
   $effect(() => {
@@ -29,7 +31,7 @@
   const winners = $derived(new Set(reveal?.winning_zones || []));
   const tally = $derived(reveal?.tally || {});
   const revealResult = $derived.by(() => {
-    if (!reveal) return null;
+    if (!reveal || !showPersonalResult) return null;
     if (!yourAnswer || !yourAnswer.zone) {
       return { text: "Keine Position erfasst", cls: "absent" };
     }
@@ -51,7 +53,9 @@
         </div>
       {/each}
     </div>
-    <div class="result {revealResult.cls}">{revealResult.text}</div>
+    {#if revealResult}
+      <div class="result {revealResult.cls}">{revealResult.text}</div>
+    {/if}
   {:else if !round}
     <div class="phase-note">Warte auf den nächsten Schritt…</div>
   {:else if round.round_type === "narration"}

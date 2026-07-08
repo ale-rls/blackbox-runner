@@ -59,7 +59,8 @@ frontend/
   player/              # Svelte player app (Vite): claim flow, all question
                        # forms, narration audio, PocketBase realtime for
                        # scores/round state. `npm run build` -> dist/,
-                       # served by the game server at /p/{player_id}.
+                       # served by the game server at /p/{player_id} and
+                       # /listen for the live round monitor.
 web/
   player/              # (legacy) phone page — served only if the Svelte
                        # build (frontend/player/dist) is absent
@@ -132,6 +133,10 @@ assigns a fresh seat id and redirects to `/p/{id}`; the id sticks in
 localStorage so re-opening the link returns the same seat. Ushers can
 still hand out explicit `/p/seat-12` links, which then become that
 phone's sticky seat.
+
+For rehearsals and failure-mode testing, `/listen` shows the current task
+without claiming a player seat. It follows the live round stream, exposes
+the current game state, and includes an audio player for narration.
 
 The production build is committed (`build/`), so running the show needs
 no Node — but after editing the frontend, rebuild and commit:
