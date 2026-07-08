@@ -294,7 +294,9 @@ async def main() -> int:
         print("POCKETBASE_ADMIN_EMAIL / POCKETBASE_ADMIN_PASSWORD not set", file=sys.stderr)
         return 2
 
-    async with httpx.AsyncClient(base_url=args.url.rstrip("/"), timeout=15.0) as http:
+    async with httpx.AsyncClient(
+        base_url=args.url.rstrip("/"), timeout=15.0, follow_redirects=True
+    ) as http:
         resp = await http.post(
             "/api/collections/_superusers/auth-with-password",
             json={"identity": args.email, "password": args.password},

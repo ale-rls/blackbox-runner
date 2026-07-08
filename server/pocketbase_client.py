@@ -166,7 +166,12 @@ class PocketBaseClient:
         self._base = url.rstrip("/")
         self._email = admin_email
         self._password = admin_password
-        self._http = httpx.AsyncClient(base_url=self._base, timeout=10.0)
+        # follow_redirects: the deployment proxy sporadically answers plain
+        # HTTP with a 307 to https during config reloads; without this the
+        # redirect body reaches resp.json() and every call 500s.
+        self._http = httpx.AsyncClient(
+            base_url=self._base, timeout=10.0, follow_redirects=True
+        )
         self._token: Optional[str] = None
         # Composite-key upsert emulation: business key -> PB record id.
         self._player_ids: dict[tuple[str, str], str] = {}
