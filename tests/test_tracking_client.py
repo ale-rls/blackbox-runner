@@ -1,6 +1,7 @@
 """Tests against a fake TrackingBox WS server that speaks the real contract:
-a ``{"type": "snapshot", ...}`` full state on connect, then bare per-GID
-change events with no ``type`` key.
+a ``{"type": "snapshot", ...}`` full state on connect, then either bare
+per-GID change events with no ``type`` key (ws_max_rate_hz = 0) or batched
+``{"type": "update", "people": [...]}`` messages (rate-limited, the default).
 """
 
 from __future__ import annotations
@@ -42,6 +43,39 @@ async def test_snapshot_and_change_events(fake_backend):
 
         history = client.history(1)
         assert len(history) >= 1
+    finally:
+        client.unsubscribe(queue)
+        client.stop()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
+async def test_batched_update_events(fake_backend):
+    """Rate-limited TrackingBox coalesces changes into ``update`` messages;
+    each entry must flow through the same path as a bare change event."""
+    fake_backend.batch_changes = True
+    client = TrackingClient(fake_backend.ws_url)
+    queue = client.subscribe()
+    task = asyncio.create_task(client.run())
+    try:
+        events = await asyncio.wait_for(_collect(queue, 3), timeout=5)
+
+        assert isinstance(events[0], ResyncEvent)
+        assert events[0].gids == {1, 2}
+
+        assert isinstance(events[1], ChangeEvent)
+        assert events[1].gid == 1
+        assert events[1].state is not None
+        assert events[1].state.floor == (0.30, 0.5)
+
+        assert isinstance(events[2], ChangeEvent)
+        assert events[2].gid == 2
+        assert events[2].state is None
+
+        assert client.get(1).zone == "answer_a"
+        assert client.get(2) is None
     finally:
         client.unsubscribe(queue)
         client.stop()

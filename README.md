@@ -34,7 +34,8 @@ its `/ws` and `/api/zones` endpoints and never modifies it for game features.
                                                      └───────────┘ └───────────┘
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) for the full design plan
+See [`docs/quickstart.md`](docs/quickstart.md) to get a dev setup running
+in five minutes, [`docs/architecture.md`](docs/architecture.md) for the full design plan
 (phases, data model, binding/rebind logic, testing strategy),
 [`docs/touchdesigner.md`](docs/touchdesigner.md) for the TD cue vocabulary,
 and **[`docs/runbook.md`](docs/runbook.md) if you're running the actual
@@ -83,6 +84,7 @@ td_scripts/
 tests/
   scenarios/           # scripted GID-churn scenarios against the mock backend
 docs/
+  quickstart.md        # dev setup: mock TrackingBox + game server in 5 min
   architecture.md      # the full design plan
   touchdesigner.md     # TD cue vocabulary + setup
   runbook.md           # ops runbook: start order, failure modes, replay
