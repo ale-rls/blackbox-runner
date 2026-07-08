@@ -1,38 +1,530 @@
-version: "1"
+# AUTHORING COPY — the server plays the show from its database, not from
+# this file. After editing, apply with:  make import-content
+# (validates first, writes nothing if invalid), then "Reload content" in
+# the admin console if the server is already running.
+version: "2"
 rounds:
-  - id: r1
-    question: "Coffee or tea?"
+  # ---------------------------------------------------------------- #
+  # K2 — Modell-Intro (Stimme über Kopfhörer)
+  # ---------------------------------------------------------------- #
+  - id: k2_intro
+    question: "Modell-Intro"
+    type: narration
+    duration_s: 0
+    grace_s: 0
+    points: 0
+    # Placeholder voice (macOS "say") — replace with the real recording or
+    # ElevenLabs render before the show.
+    audio: k2_intro.mp3
+    text: |
+      Hallo, herzlich willkommen.
+      Schön, dass du dich für die “KI-Blackbox” entschieden hast. 
+      Heute Abend entwickeln wir gemeinsam ein neues Mensch-Maschine-System.
+      Kein fertiges Produkt.
+      Kein Prototyp aus einem Forschungslabor.
+      Kein Milliardenprojekt eines Technologiekonzerns.
+      Unser Modell existiert noch nicht.
+      Es beginnt genau jetzt.
+      Mit dir. 
+      Vielleicht fragst du dich, warum ausgerechnet Menschen ein KI-Modell bauen sollten.
+      Die meisten Systeme, die unseren Alltag prägen, entstehen hinter verschlossenen Türen. In Rechenzentren. In Forschungslaboren. In Unternehmen mit enormen Ressourcen. Ihre Funktionsweise bleibt oft verborgen. Ihre Entscheidungen erscheinen objektiv, obwohl sie auf zahllosen Annahmen beruhen.
+      Heute Abend drehen wir diese Logik um.
+      Wir öffnen die Blackbox.
+      Oder zumindest versuchen wir es.
+      Dafür brauchen wir keine Milliarden Parameter.
+      Wir brauchen euch.
+      Eure Körper.
+      Eure Entscheidungen.
+      Eure Bewegungen.
+      Eure Aufmerksamkeit.
+      In den nächsten Minuten wird aus einer Gruppe von Besucher:innen langsam ein gemeinsames Modell entstehen.
+      Ein hybrides Modell.
+      Nicht ausschließlich menschlich.
+      Nicht ausschließlich künstlich.
+      Eine Zusammenarbeit zwischen natürlicher und künstlicher Intelligenz.
+      Zwischen Wahrnehmung und Berechnung.
+      Zwischen Theater und Algorithmus.
+      Im Verlauf des Abends werden unterschiedliche Systeme miteinander arbeiten.
+      Große Sprachmodelle.
+      Computer Vision.
+      Programme, die Muster erkennen.
+      Programme, die Sprache erzeugen.
+      Und ihr.
+      Nicht als Publikum, sondern als lebendige Bestandteile dieses Systems.
+      Jede Bewegung kann Bedeutung bekommen.
+      Jede Position kann zu Information werden.
+      Jede Entscheidung kann eine Berechnung verändern.
+      Vielleicht werden wir später verstehen, wie dieses Modell funktioniert.
+      Vielleicht auch nicht.
+      Denn jede Blackbox bleibt in gewisser Weise eine Blackbox.
+      Auch diese hier.
+      Es geht heute Abend nicht darum, alle Antworten zu finden.
+      Sondern gemeinsam zu beobachten, wie Antworten entstehen.
+      Und wer oder was sie eigentlich erzeugt.
+      Noch seid ihr einfach hier.
+      Gleich beginnt das Modell von euch zu lernen.
+      Und vielleicht beginnt gleichzeitig etwas anderes.
+      Nicht nur die Maschine verändert sich.
+      Vielleicht verändert sich auch eure Vorstellung davon, was eine Maschine überhaupt ist.
+      Lasst uns beginnen. 
+
+      Das Training eines KI-Modells gliedert sich in Epochen. Wir beginnen mit der Trainingsepoche “Arbeit”. Erinnere dich an deine bisherige Arbeit. Deine Arbeit  in der Welt außerhalb unserer Blackbox. 
+
+  # ---------------------------------------------------------------- #
+  # K3 — Trainingsstrecke: Arbeit
+  # ---------------------------------------------------------------- #
+  - id: k3_intro
+    question: "Trainingsepoche: Arbeit"
+    type: narration
+    duration_s: 0
+    grace_s: 0
+    points: 0
+    text: |
+      Auf dem Boden siehst du verschiedenfarbige Markierungen. Positioniere dich auf ihnen entsprechend der Fragen, die du gleich gestellt bekommst. Es gibt drei verschiedene Arten von Markierungen. Für sie gelten unterschiedliche Regeln:
+      Bei der rosa Linie gilt: Ordne dich auf ihr zwischen zwei verschiedenen Polen ein. Wie auf einer einfachen Skala 
+      Für die rosa und die grüne Markierung zusammen gilt: Ordne dich auf dem Feld ein, das die beiden Achsen zusammen ergeben. Was sie bedeuten, musst du dabei gleichzeitig berücksichtigen.
+      Bei den blauen Kreisringen gilt: Die Mitte steht für maximale Zustimmung. Je weiter du von dich von der Mitte entfernst, desto geringer ist deine Zustimmung. Wenn du einer Aussage überhaupt nicht zustimmst, bewege dich an den Rand der Kreisringe.
+      Bitte stellt euch zu Beginn so auf, dass ihr den Vorhang vor euch habt.
+      Lasst uns beginnen. 
+
+    audio: k3_intro.mp3
+  - id: arbeit_1
+    question: "Wie fühlt sich deine bisherige Arbeit für dich an?"
     type: majority
-    duration_s: 20
+    duration_s: 45
     grace_s: 5
-    points: 10
+    points: 0
+    form: scale
+    form_labels:
+      left: Ich liebe diese Arbeit
+      right: Diese Arbeit ist nicht auszuhalten
+    audio: arbeit_1.mp3
+    text: |
+      Wie fühlt sich deine bisherige Arbeit für dich an?
+      Positioniere dich auf der rosa Skala zwischen links “Ich liebe diese Arbeit” und rechts “Diese Arbeit ist nicht auszuhalten”.
     options:
-      - zone: answer_a
-        label: "Coffee"
-      - zone: answer_b
-        label: "Tea"
+      - zone: scale_left
+        label: Ich liebe diese Arbeit
+        correct: false
+      - zone: scale_mid
+        label: Mitte
+        correct: false
+      - zone: scale_right
+        label: Diese Arbeit ist nicht auszuhalten
+        correct: false
+  - id: arbeit_2
+    question: "Wie sinnvoll ist deine bisherige Arbeit für dich selbst und wie sinnvoll ist sie für andere?"
+    type: majority
+    duration_s: 45
+    grace_s: 5
+    points: 0
+    form: cross
+    form_labels:
+      x_left: wenig sinnvoll für andere
+      x_right: sehr sinnvoll für andere
+      y_top: sehr sinnvoll für mich
+      y_bottom: wenig sinnvoll für mich
+    text: |
+      Wie sinnvoll ist deine bisherige Arbeit für dich selbst und wie sinnvoll ist sie für andere?
+      Positioniere dich im Feld zwischen den beiden Achsen. Die grüne Achse zeigt, wie sinnvoll deine bisherige Arbeit für dich selbst ist. Von “wenig sinnvoll für mich” unten bis “sehr sinnvoll für mich” oben. Die rosa Achse zeigt, wie sinnvoll sie für andere ist. Von “wenig sinnvoll für andere” links bis “sehr sinnvoll für andere” rechts. 
+      Berücksichtige beide Achsen gleichzeitig und wähle die Position, die deiner Einschätzung am besten entspricht.
+    options:
+      - zone: cross_tl
+        label: sinnvoll für mich, wenig für andere
+        correct: false
+      - zone: cross_tr
+        label: sinnvoll für mich und für andere
+        correct: false
+      - zone: cross_bl
+        label: wenig sinnvoll für mich und für andere
+        correct: false
+      - zone: cross_br
+        label: wenig sinnvoll für mich, sinnvoll für andere
+        correct: false
+    audio: arbeit_2.mp3
+  - id: arbeit_3
+    question: "Wie frei bist du in deinen Arbeitsentscheidungen?"
+    type: majority
+    duration_s: 45
+    grace_s: 5
+    points: 0
+    form: scale
+    form_labels:
+      left: Ich empfange Befehle
+      right: Ich entscheide selbst
+    text: |-
+      Wie angemessen wurdest du für deine bisherige Arbeit bezahlt?
+      Positioniere dich auf der rosa Skala zwischen links „viel zu wenig“ und rechts „überbezahlt“. Die Mitte der Skala bedeutet „angemessen bezahlt“.
+    options:
+      - zone: scale_left
+        label: Ich empfange Befehle
+        correct: false
+      - zone: scale_mid
+        label: Mitte
+        correct: false
+      - zone: scale_right
+        label: Ich entscheide selbst
+        correct: false
+    audio: arbeit_3.mp3
+  - id: arbeit_4
+    question: "Wie angemessen wurdest du für deine bisherige Arbeit bezahlt?"
+    type: majority
+    duration_s: 45
+    grace_s: 5
+    points: 0
+    form: scale3
+    form_labels:
+      left: viel zu wenig
+      middle: angemessen
+      right: überbezahlt
+    text: |-
+      Wie angemessen wurdest du für deine bisherige Arbeit bezahlt?
+      Positioniere dich auf der rosa Skala zwischen links „viel zu wenig“ und rechts „überbezahlt“. Die Mitte der Skala bedeutet „angemessen bezahlt“.
+    options:
+      - zone: scale_left
+        label: viel zu wenig
+        correct: false
+      - zone: scale_mid
+        label: angemessen
+        correct: false
+      - zone: scale_right
+        label: überbezahlt
+        correct: false
+    audio: arbeit_4.mp3
+  - id: arbeit_5
+    question: "Wie groß ist deine Sorge, in deiner Arbeit durch andere Menschen ersetzt zu werden?"
+    type: majority
+    duration_s: 45
+    grace_s: 5
+    points: 0
+    form: scale3
+    form_labels:
+      left: Ich bin eher geschrumpft
+      middle: Ich bin stehengeblieben
+      right: Ich bin sehr stark gewachsen
+    text: |-
+      Wie groß ist deine Sorge, in deiner Arbeit durch andere Menschen ersetzt zu werden?
+      Positioniere dich auf der rosa Skala zwischen links “keine Sorge” und rechts “sehr große Sorge”.
+    options:
+      - zone: scale_left
+        label: Ich bin eher geschrumpft
+        correct: false
+      - zone: scale_mid
+        label: Ich bin stehengeblieben
+        correct: false
+      - zone: scale_right
+        label: Ich bin sehr stark gewachsen
+        correct: false
+    audio: arbeit_5.mp3
+  - id: arbeit_6
+    question: "Wie verbunden fühlst du dich mit den Menschen, mit denen du bisher gearbeitet hast?"
+    type: majority
+    duration_s: 45
+    grace_s: 5
+    points: 0
+    form: rings
+    form_labels:
+      center: sehr verbunden
+      edge: sehr isoliert
+    text: |
+      Wie verbunden fühlst du dich mit den Menschen, mit denen du bisher gearbeitet hast?
+      Stelle dich näher zur Mitte der blauen Kreisringe, je mehr du dich sehr verbunden fühlst.
+      Stelle dich weiter nach außen, wenn du dich sehr isoliert fühlst.
+    options:
+      - zone: ring_center
+        label: sehr verbunden
+        correct: false
+      - zone: ring_mid
+        label: teils verbunden
+        correct: false
+      - zone: ring_outer
+        label: sehr isoliert
+        correct: false
+    audio: arbeit_6.mp3
+  - id: arbeit_7
+    question: "Wie groß ist deine Sorge, in deiner Arbeit durch andere Menschen ersetzt zu werden?"
+    type: majority
+    duration_s: 45
+    grace_s: 5
+    points: 0
+    form: scale
+    form_labels:
+      left: "keine Sorge"
+      right: "sehr große Sorge"
+    text: |
+      Wie groß ist deine Sorge, in deiner Arbeit durch andere Menschen ersetzt zu werden?
+      Positioniere dich auf der rosa Skala zwischen links "keine Sorge" und rechts "sehr große Sorge".
+    options:
+      - zone: scale_left
+        label: "keine Sorge"
+      - zone: scale_mid
+        label: "Mitte"
+      - zone: scale_right
+        label: "sehr große Sorge"
 
-  - id: r2
-    question: "Pick the real one."
-    type: correct_zone
-    duration_s: 20
+    audio: arbeit_7.mp3
+  - id: arbeit_8
+    question: "Wie groß ist deine Sorge, in deiner Arbeit durch Maschinen oder KI-Systeme ersetzt zu werden?"
+    type: majority
+    duration_s: 45
     grace_s: 5
-    points: 15
+    points: 0
+    form: scale
+    form_labels:
+      left: keine Sorge
+      right: sehr große Sorge
+    text: |-
+      Wie groß ist deine Sorge, in deiner Arbeit durch Maschinen oder KI-Systeme ersetzt zu werden?
+      Positioniere dich auf der rosa Skala zwischen links “keine Sorge” und rechts “sehr große Sorge”.
     options:
-      - zone: answer_a
-        label: "Left"
-        correct: true
-      - zone: answer_b
-        label: "Right"
+      - zone: scale_left
+        label: keine Sorge
+        correct: false
+      - zone: scale_mid
+        label: Mitte
+        correct: false
+      - zone: scale_right
+        label: sehr große Sorge
+        correct: false
+    audio: arbeit_8.mp3
+  - id: k3_1_abschluss
+    question: "Abschluss Trainingsstrecke Arbeit"
+    type: narration
+    duration_s: 0
+    grace_s: 0
+    points: 0
+    text: |
+      Das Modell hat eure bisherigen Arbeitsverhältnisse gelesen.
 
-  - id: r3
-    question: "Pick the road less traveled."
-    type: minority
-    duration_s: 20
+      Eure Positionen im Raum. Daraus entstehen erste Muster.
+      Das Modell erkennt:
+       Arbeit ist nicht nur Tätigkeit.
+       Arbeit ist ein Koordinatensystem.
+      Nähe.
+      Druck.
+      Sinn.
+      Bezahlung.
+      Wachstum.
+      Ersetzbarkeit.
+      Ihr habt euch positioniert. Das Modell beginnt euch zu gewichten.
+
+  # ---------------------------------------------------------------- #
+  # K4 — Trainingsepoche: Mensch–Maschine
+  # ---------------------------------------------------------------- #
+    audio: k3_1_abschluss.mp3
+  - id: k4_intro
+    question: "Trainingsepoche: Mensch–Maschine"
+    type: narration
+    duration_s: 0
+    grace_s: 0
+    points: 0
+    text: |
+      Wir beginnen die nächste Trainingsepoche, Thema “Mensch-Maschine”:
+      Bevor es losgeht, kehrt bitte in die Ausgangsposition zurück. Stellt euch so auf, dass ihr den Vorhang vor euch habt.
+      Lasst uns beginnen.
+
+    audio: k4_intro.mp3
+  - id: mensch_maschine_1
+    question: "Wie lange könntest du im Alltag deine Verbindung zum Netz trennen, ohne Angst zu haben, etwas Wichtiges zu verpassen?"
+    type: majority
+    duration_s: 45
     grace_s: 5
-    points: 20
+    points: 0
+    form: scale
+    form_labels:
+      left: keine 10 Minuten
+      right: wochenlang
+    text: |
+      Wie lange könntest du im Alltag deine Verbindung zum Netz trennen, ohne Angst zu haben, etwas Wichtiges zu verpassen?
+      Positioniere dich auf der rosa Skala zwischen links “keine 10 Minuten” und rechts “wochenlang”.
     options:
-      - zone: answer_a
-        label: "Well-lit path"
-      - zone: answer_b
-        label: "Dark path"
+      - zone: scale_left
+        label: keine 10 Minuten
+        correct: false
+      - zone: scale_mid
+        label: Mitte
+        correct: false
+      - zone: scale_right
+        label: wochenlang
+        correct: false
+    audio: mensch_maschine_1.mp3
+  - id: mensch_maschine_2
+    question: "Wer weiß mehr über dich?"
+    type: majority
+    duration_s: 45
+    grace_s: 5
+    points: 0
+    form: scale
+    form_labels:
+      left: meine Freund:innen
+      right: mein Smartphone
+    text: |
+      Wer weiß mehr über dich: deine Freund:innen oder dein Smartphone?
+      Positioniere dich auf der rosa Skala zwischen links “meine Freund:innen” und rechts “mein Smartphone”.
+    options:
+      - zone: scale_left
+        label: meine Freund:innen
+        correct: false
+      - zone: scale_mid
+        label: Mitte
+        correct: false
+      - zone: scale_right
+        label: mein Smartphone
+        correct: false
+    audio: mensch_maschine_2.mp3
+  - id: mensch_maschine_3
+    question: "Was von dir würdest du niemals mit einer Maschine teilen?"
+    type: majority
+    duration_s: 45
+    grace_s: 5
+    points: 0
+    form: quadrants
+    text: |-
+      Was von dir würdest du niemals mit einer Maschine teilen?
+      Positioniere dich in einem der vier Felder, die die rosa und grünen Linien zusammen bilden. Das Feld oben links bedeutet“ mein Körper”, das Feld oben rechts “meine Gedanken”. Das Feld unten links bedeutet “meine Beziehungen”, das Feld unten rechts “nichts ist unantastbar”.
+    options:
+      - zone: cross_tl
+        label: mein Körper
+        correct: false
+      - zone: cross_tr
+        label: meine Gedanken
+        correct: false
+      - zone: cross_bl
+        label: meine Beziehungen
+        correct: false
+      - zone: cross_br
+        label: nichts ist unantastbar
+        correct: false
+    audio: mensch_maschine_3.mp3
+  - id: mensch_maschine_4
+    question: "Wie wichtig ist es dir, dass es Bereiche deines Lebens gibt, die kein digitales System kennen kann?"
+    type: majority
+    duration_s: 45
+    grace_s: 5
+    points: 0
+    form: rings
+    form_labels:
+      center: überhaupt nicht wichtig
+      edge: sehr wichtig
+    text: |
+      Wie wichtig ist es dir, dass es Bereiche deines Lebens gibt, die kein digitales System kennen kann?
+      Stelle dich näher zur Mitte der blauen Kreisringe, wenn es dir überhaupt nicht wichtig ist.
+      Stelle dich weiter nach außen, wenn es dir sehr wichtig ist.
+    options:
+      - zone: ring_center
+        label: überhaupt nicht wichtig
+        correct: false
+      - zone: ring_mid
+        label: mittel
+        correct: false
+      - zone: ring_outer
+        label: sehr wichtig
+        correct: false
+    audio: mensch_maschine_4.mp3
+  - id: mensch_maschine_5
+    question: "Wie werden Menschen und Maschinen in zwanzig Jahren zusammenleben?"
+    type: majority
+    duration_s: 45
+    grace_s: 5
+    points: 0
+    form: cross
+    form_labels:
+      x_left: getrennt
+      x_right: verschmolzen
+      y_top: die Menschen führen
+      y_bottom: die Maschinen führen
+    text: |
+      Wie werden Menschen und Maschinen in zwanzig Jahren zusammenleben?
+      Positioniere dich im Feld zwischen den beiden Achsen. Die grüne Achse zeigt an, wer in der Zukunft führt. Von “die Maschinen führen” unten bis “die Menschen führen” oben. Die rosa Achse zeigt den Grad des Zusammenseins an. Von “getrennt” links bis “verschmolzen” rechts. 
+      Berücksichtige beide Achsen gleichzeitig und wähle die Position, die deiner Einschätzung am besten entspricht.
+    options:
+      - zone: cross_tl
+        label: Menschen führen, getrennt
+        correct: false
+      - zone: cross_tr
+        label: Menschen führen, verschmolzen
+        correct: false
+      - zone: cross_bl
+        label: Maschinen führen, getrennt
+        correct: false
+      - zone: cross_br
+        label: Maschinen führen, verschmolzen
+        correct: false
+    audio: mensch_maschine_5.mp3
+  - id: mensch_maschine_6
+    question: "Wie möchtest du selbst in Zukunft mit Maschinen zusammenleben?"
+    type: majority
+    duration_s: 45
+    grace_s: 5
+    points: 0
+    form: cross
+    form_labels:
+      x_left: getrennt
+      x_right: verschmolzen
+      y_top: ich führe
+      y_bottom: die Maschine führt
+    text: |-
+      Wie möchtest du selbst in Zukunft mit Maschinen zusammenleben?
+      Positioniere dich im Feld zwischen den beiden Achsen. Die grüne Achse zeigt an, wer für dich in der Zukunft führt. Von “die Maschine führt” unten bis “ich führe” oben. Die rosa Achse zeigt den Grad des Zusammenseins an. Von “getrennt” links bis “verschmolzen” rechts. 
+    options:
+      - zone: cross_tl
+        label: ich führe, getrennt
+        correct: false
+      - zone: cross_tr
+        label: ich führe, verschmolzen
+        correct: false
+      - zone: cross_bl
+        label: die Maschine führt, getrennt
+        correct: false
+      - zone: cross_br
+        label: die Maschine führt, verschmolzen
+        correct: false
+    audio: mensch_maschine_6.mp3
+  - id: mensch_maschine_7
+    question: "Wie gut könntest du dein heutiges Leben ohne digitale und KI-basierte Systeme organisieren?"
+    type: majority
+    duration_s: 45
+    grace_s: 5
+    points: 0
+    form: scale
+    form_labels:
+      left: ohne Schwierigkeiten
+      right: gar nicht mehr
+    text: |-
+      Wie gut könntest du dein heutiges Leben ohne digitale und KI-basierte Systeme organisieren?
+      Positioniere dich auf der rosa Skala zwischen links “ohne Schwierigkeiten” und rechts “gar nicht mehr”.
+    options:
+      - zone: scale_left
+        label: ohne Schwierigkeiten
+        correct: false
+      - zone: scale_mid
+        label: Mitte
+        correct: false
+      - zone: scale_right
+        label: gar nicht mehr
+        correct: false
+    audio: mensch_maschine_7.mp3
+  - id: mensch_maschine_8
+    question: "Wie weit möchtest du dich digitalen und KI-basierten Systemen entziehen?"
+    type: majority
+    duration_s: 45
+    grace_s: 5
+    points: 0
+    form: scale
+    form_labels:
+      left: Ich möchte mich komplett entziehen
+      right: Ich möchte mit ihnen verschmelzen
+    text: |-
+      Wie weit möchtest du dich digitalen und KI-basierten Systemen entziehen?
+      Positioniere dich auf der rosa Skala zwischen links “Ich möchte mich komplett entziehen” und rechts “ich möchte mit ihnen verschmelzen”
+    options:
+      - zone: scale_left
+        label: Ich möchte mich komplett entziehen
+        correct: false
+      - zone: scale_mid
+        label: Mitte
+        correct: false
+      - zone: scale_right
+        label: Ich möchte mit ihnen verschmelzen
+        correct: false
+    audio: mensch_maschine_8.mp3

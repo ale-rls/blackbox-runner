@@ -11,7 +11,6 @@ import pytest
 
 from server.bindings import BindingError, BindingManager, PlayerState
 from server.models import AudienceSummary
-from server.persistence import Database
 from server.tracking_client import ChangeEvent, ResyncEvent, TrackingClient
 
 
@@ -22,12 +21,10 @@ def _seed(tracking: TrackingClient, gid: int, *, visible: bool = True, floor=(0.
 
 
 @pytest.fixture
-def db():
-    database = Database(":memory:")
-    try:
-        yield database
-    finally:
-        database.close()
+async def db(pb):
+    """The connected PocketBaseClient (against the in-process fake) — same
+    role the ':memory:' Database fixture used to play."""
+    return pb
 
 
 @pytest.fixture
@@ -37,7 +34,7 @@ def tracking():
 
 @pytest.fixture
 async def manager(db, tracking):
-    session_id = db.create_session()
+    session_id = await db.create_session()
     return await BindingManager.load(db, session_id, tracking)
 
 
@@ -45,7 +42,7 @@ async def manager(db, tracking):
 async def churn_manager(db, tracking):
     """A manager tuned for fast, deterministic churn tests: short orphan
     delay, a small rebind radius/window, and a ritual zone enabled."""
-    session_id = db.create_session()
+    session_id = await db.create_session()
     return await BindingManager.load(
         db,
         session_id,
@@ -65,10 +62,10 @@ async def test_claim_success(manager, tracking, db):
     assert player.gid == 101
     assert manager.player_for_gid(101).id == "p1"
 
-    rows = db.load_players(manager.session_id)
+    rows = await db.load_players(manager.session_id)
     assert len(rows) == 1
     assert rows[0].gid == 101
-    events = db.load_binding_events(manager.session_id)
+    events = await db.load_binding_events(manager.session_id)
     assert events[-1].reason == "claim"
     assert events[-1].new_gid == 101
 
@@ -210,7 +207,7 @@ async def test_auto_rebind_records_binding_event(churn_manager, tracking, db):
     _seed(tracking, 202, floor=(0.51, 0.51))
     await churn_manager.handle_tracking_event(ChangeEvent(gid=202, state=tracking.get(202)))
 
-    events = db.load_binding_events(churn_manager.session_id)
+    events = await db.load_binding_events(churn_manager.session_id)
     assert events[-1].reason == "auto_rebind"
     assert events[-1].new_gid == 202
     assert events[-1].player_id == "p1"

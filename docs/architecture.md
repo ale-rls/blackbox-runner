@@ -43,29 +43,34 @@ and never modify it for game features.
 
 ### TrackingBox WS contract (as pinned)
 
-The `/ws` endpoint sends one of three shapes, undiscriminated except by the
+The `/ws` endpoint sends one of three shapes, discriminated by the
 presence and value of `type`:
 
 * `{"type": "snapshot", "data": {...}}` — full snapshot, sent once on
   connect and again on every heartbeat (`ws_heartbeat_interval_s`, default
   10s) if no change events arrived in that window.
+* `{"type": "update", "people": [{...}, ...]}` — a batched change event:
+  a list of one or more per-GID entries, each shaped like the bare change
+  event below. **The currently-running TrackingBox instance sends only this
+  batched form for changes**, never the bare per-GID dict; the client
+  applies each entry in `people` as an individual change.
 * A bare per-GID change event with no `type` key:
   `{"gid": int, "visible": bool, "center": [x,y]|null, "bbox": [...]|null,
   "floor": [x,y]|null, "floor_valid": bool, "zone": str|null}`. A GID
   dropping out of the snapshot entirely is emitted as `visible: false`.
-  Sent only when TrackingBox's rate limiting is off (`ws_max_rate_hz: 0`).
-* `{"type": "update", "people": [<change event>, ...]}` — with rate limiting
-  on (`ws_max_rate_hz` > 0, TrackingBox's default of 20), change events are
-  coalesced (last event per GID wins) into one batched message per tick.
-  Note that under steady change-event traffic the heartbeat snapshot never
-  fires, so this is the shape carrying nearly all live state.
+  The client still supports this shape for back-compat with older
+  TrackingBox versions.
 
 `floor` is calibrated floor-space `[x, y]`, used for zone lookups. `zone` is
 already resolved server-side by TrackingBox's `ZoneMap` (first enabled zone
-containing the point wins; falls back to `default_zone` if configured). The
-game server still needs `/api/zones` for the zone map so answer options in
-`content/show.yaml` can validate zone IDs and the admin dashboard can render
-the floor.
+containing the point wins; falls back to `default_zone` if configured) —
+the game layer uses it for the ritual corner and for "choice" rounds.
+Question rounds instead carry a per-question `zone_layout` (`server/zones.py`)
+that divides the whole floor into that question's shape — concentric
+`circles`, `x_axis`/`y_axis` bands, or `quadrants` — and resolve each
+player's answer zone from `floor` directly, so TrackingBox's static zone map
+doesn't have to carve every shape into the floor at once. The game server
+still fetches `/api/zones` so "choice" options can validate zone IDs.
 
 ## 2. Repo layout
 
@@ -77,12 +82,13 @@ server/
   engine.py            # round state machine, timers, zone evaluation, scoring
   persistence.py       # SQLite (WAL), write-through, crash recovery
   models.py            # pydantic models incl. copied TrackingBox message shapes
-  content.py           # loads/validates rounds & questions from content/
+  content.py           # validates rounds & questions (pydantic models)
+  content_db.py        # loads the show from the DB (runtime source of truth)
 web/
   player/              # phone page (one per player ID)
   admin/                # operator dashboard
 content/
-  show.yaml            # rounds, questions, zone->answer mapping, timing
+  show.yaml            # AUTHORING copy: edit here, then scripts/import_content.py
 tests/
   scenarios/           # scripted GID-churn scenarios against the mock backend
 Makefile               # `make dev` boots TrackingBox (mock) + game server + web
@@ -112,10 +118,22 @@ transition, so a crashed game server reloads mid-show exactly where it died.
 * `score_events(id, session_id, player_id, round_id, points, reason)` —
   scores are derived (SUM), never stored as a mutable counter; operator
   corrections are just more events.
+* `content_rounds(id, round_id, ord, question, type, duration_s, grace_s,
+  points, text, audio, form, zone_layout, form_labels, options)` +
+  `content_meta(version)` — the show's rounds/questions themselves.
+  `form_labels`/`options` are JSON text (always read/written whole);
+  `ord` gives the engine its stable round order. Written only whole-show
+  in one transaction (import script and admin edits alike), so storage
+  never holds a half-written show.
 
-Questions/rounds live in `content/show.yaml` (editable by non-programmers,
-hot-reloaded between rounds), validated on load: every answer option must
-reference a zone ID that exists in TrackingBox's `/api/zones`.
+Questions/rounds are authored in `content/show.yaml` (editable by
+non-programmers, git-tracked for diffs) and pushed into `content_rounds`
+with `scripts/import_content.py`; the server loads only the DB, and
+hot-reloads it between rounds. Validation is the same either way: rounds
+with a `zone_layout` must have an option count their layout supports
+(options are ordered along the layout — left→right, top→bottom,
+tl/tr/bl/br, center→edge); "choice" round options must reference a zone ID
+that exists in TrackingBox's `/api/zones`.
 
 ## 4. Core components
 
@@ -155,11 +173,13 @@ Per-player state machine: `unclaimed -> bound -> lost -> (bound | orphaned) -> b
 
 ### 4.3 Game engine
 
-* Round state machine driven by `content/show.yaml` + operator commands
-  (auto-advance timers with manual override always available).
+* Round state machine driven by the DB-stored show content + operator
+  commands (auto-advance timers with manual override always available).
 * Answer evaluation: at `closing`, take one authoritative position
-  snapshot; map each bound player's floor point through the zone map (same
-  first-match semantics as TrackingBox's `ZoneMap`). Players in
+  snapshot; resolve each bound player's floor point through the round's
+  `zone_layout` (circles / x_axis / y_axis / quadrants over the whole
+  floor; `server/zones.py`), or through TrackingBox's live `zone` for
+  "choice" rounds. Players in
   `lost/orphaned` state at close are recorded `absent`, never wrong — with
   an optional short grace window: if they rebind within N seconds and their
   GID was continuously inside one zone, upgrade to `late_grace`. This

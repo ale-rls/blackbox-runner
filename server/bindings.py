@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-from .persistence import Database, PlayerRow
+from .pocketbase_client import PlayerRow, PocketBaseClient
 from .tracking_client import ChangeEvent, ResyncEvent, TrackingClient, TrackingEvent
 
 log = logging.getLogger("blackbox_runner.bindings")
@@ -57,7 +57,7 @@ class BindingError(ValueError):
 @dataclass(slots=True)
 class Player:
     id: str
-    session_id: int
+    session_id: str
     gid: Optional[int] = None
     display_name: Optional[str] = None
     state: PlayerState = PlayerState.UNCLAIMED
@@ -105,7 +105,7 @@ class Player:
 class BindingManager:
     """In-memory source of truth for player<->GID bindings.
 
-    Every meaningful transition is written through to SQLite immediately
+    Every meaningful transition is written through to PocketBase immediately
     (see :meth:`_save`), so :meth:`load` can rebuild identical state after a
     crash. Subscribes to a :class:`TrackingClient` to detect when a bound
     GID disappears.
@@ -113,8 +113,8 @@ class BindingManager:
 
     def __init__(
         self,
-        db: Database,
-        session_id: int,
+        db: PocketBaseClient,
+        session_id: str,
         tracking: TrackingClient,
         *,
         rebind_max_distance: float = 0.15,
@@ -137,20 +137,20 @@ class BindingManager:
     @classmethod
     async def load(
         cls,
-        db: Database,
-        session_id: int,
+        db: PocketBaseClient,
+        session_id: str,
         tracking: TrackingClient,
         **kwargs,
     ) -> "BindingManager":
         mgr = cls(db, session_id, tracking, **kwargs)
-        rows = await asyncio.to_thread(db.load_players, session_id)
+        rows = await db.load_players(session_id)
         for row in rows:
             player = Player.from_row(row)
             mgr._players[player.id] = player
             if player.state == PlayerState.BOUND and player.gid is not None:
                 mgr._by_gid[player.gid] = player.id
         log.info(
-            "Loaded %d player(s) from session %d (%d currently bound)",
+            "Loaded %d player(s) from session %s (%d currently bound)",
             len(mgr._players),
             session_id,
             len(mgr._by_gid),
@@ -169,6 +169,10 @@ class BindingManager:
     def player_for_gid(self, gid: int) -> Optional[Player]:
         pid = self._by_gid.get(gid)
         return self._players.get(pid) if pid else None
+
+    def bound_gids(self) -> set[int]:
+        """GIDs currently bound to some player — i.e. *not* claimable."""
+        return set(self._by_gid)
 
     # ------------------------------------------------------------------ #
     # Subscription (admin board / TD)
@@ -279,7 +283,7 @@ class BindingManager:
             return
         player.state = PlayerState.ORPHANED
         self._players[player.id] = player
-        await asyncio.to_thread(self._db.upsert_player, player.to_row())
+        await self._db.upsert_player(player.to_row())
         self._publish(player)
         log.info(
             "Player %s orphaned after %.1fs with no confident auto-rebind",
@@ -358,9 +362,8 @@ class BindingManager:
             self._by_gid.pop(old_gid, None)
         if new_gid is not None and player.state == PlayerState.BOUND:
             self._by_gid[new_gid] = player.id
-        await asyncio.to_thread(self._db.upsert_player, player.to_row())
-        await asyncio.to_thread(
-            self._db.record_binding_event,
+        await self._db.upsert_player(player.to_row())
+        await self._db.record_binding_event(
             self.session_id,
             player.id,
             old_gid,
@@ -400,7 +403,7 @@ class BindingManager:
                     player.last_seen_x, player.last_seen_y = event.state.floor
                 player.last_seen_at = time.time()
                 self._players[player.id] = player
-                await asyncio.to_thread(self._db.upsert_player, player.to_row())
+                await self._db.upsert_player(player.to_row())
                 return
 
             # An unbound GID: try auto-rebind (and the ritual zone) on every

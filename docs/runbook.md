@@ -18,6 +18,13 @@ terminal output before touching anything else.
 
 ## Start order
 
+The game server persists everything in **PocketBase** (see
+[PocketBase persistence backend](#pocketbase-persistence-backend) below) —
+make sure `POCKETBASE_URL` / `POCKETBASE_ADMIN_EMAIL` /
+`POCKETBASE_ADMIN_PASSWORD` are set in `.env` and the instance is
+reachable, or the game server refuses to start (deliberately: there is no
+degraded mode without persistence).
+
 Start TrackingBox **first**, wait for it to be healthy, **then** start the
 game server. Starting them the other way round isn't harmful (the game
 server retries the connection), but it makes the first couple of minutes
@@ -69,7 +76,7 @@ people to physically be standing.
 
 From the admin dashboard's **Round control** section:
 
-- **Start next round** — opens the next question in `content/show.yaml`.
+- **Start next round** — opens the next question of the imported show.
   Timing is automatic from there (`duration_s`, then `grace_s`), but you
   can also:
 - **Close** — lock in answers early (e.g. everyone's clearly settled and
@@ -83,6 +90,52 @@ board** keeps running underneath the whole time — orphaned players
 persistent orphan (more than a few seconds) is your cue to walk over and
 help, or use the **Rebind** button next to their row once you can see
 which dot is them.
+
+### Narration steps and audio
+
+Steps with `type: narration` (the Modell-Intro,
+epoch intros/outros) have no answers and no timer when `duration_s: 0`:
+**Start next round** opens them, the players read the `text` and hear the
+mp3, and you press **Reveal** to finish the step and move on.
+
+Voice-over mp3s live in `content/audio/` (override with `GAME_AUDIO_DIR`)
+and are served at `/audio/<name>.mp3`. To wire one up: drop the file in
+that folder, set the step's audio file via the **Show editor** (or set
+`audio: <name>.mp3` in `show.yaml` and re-import), then **Reload content**
+from the admin dashboard (only works between rounds).
+Players unlock audio with their first tap (the claim button); anyone who
+reconnects without tapping gets a "Tippen, um den Ton zu starten" overlay
+the next time a step tries to speak.
+
+### Show editor and ElevenLabs voice generation
+
+The **Show editor** card at the bottom of the admin dashboard lists every
+step of the imported show. **Edit** changes a step's question/title,
+narration text, audio file, timing, and labels; **Save changes** writes
+straight to the server's database and hot-reloads it if no round is in
+flight. If a round *is* in flight the edit is still saved and takes effect
+on the next **Reload content**. Structural changes — adding/removing
+steps, changing zones or form types — are done in the authoring copy
+`content/show.yaml`, then applied with `scripts/import_content.py` (see
+[Content freeze process](#content-freeze-process)). Note that admin-console
+edits live only in the DB: re-importing show.yaml overwrites them, so port
+edits you want to keep back into the YAML.
+
+To generate voice-overs with ElevenLabs, start the server with an API key
+(and usually a default voice):
+
+```bash
+ELEVENLABS_API_KEY=... ELEVENLABS_VOICE_ID=... make dev
+# optional: ELEVENLABS_MODEL_ID (default eleven_multilingual_v2, good German)
+```
+
+Then use **Generate voice** on a step (renders that step's `text` to
+`content/audio/<step-id>.mp3` and points the step's `audio:` at it) or
+**Generate missing audio** to fill every step that has no mp3 on disk.
+The voice id field in the card header overrides the default voice per
+generation — handy for auditioning voices. Generation costs ElevenLabs
+credits and a long monologue takes tens of seconds; do this in prep, not
+mid-show.
 
 ## Health checks, anytime
 
@@ -142,9 +195,9 @@ re-run.
 ## Crash recovery: what actually happens
 
 Every meaningful state change (a claim, a rebind, a round opening,
-closing, or revealing, a score) is written to SQLite immediately — not
+closing, or revealing, a score) is written to PocketBase immediately — not
 batched, not buffered. If the game server process dies for any reason and
-you restart it against the same database file:
+you restart it against the same PocketBase instance:
 
 - Every player's binding state (who's bound to what GID, or lost) is
   exactly as it was the instant before the crash.
@@ -158,13 +211,13 @@ you restart it against the same database file:
   (the server doesn't know how long it was down for).
 
 You do not need to do anything special to "resume" a session — starting
-the game server against the same `--db` file (the default, unless
-`GAME_DB_PATH` was overridden) picks the same session back up
-automatically. The startup log line tells you which happened:
+the game server against the same PocketBase instance picks the same
+active session back up automatically. The startup log line tells you
+which happened:
 
 ```
-Started new session 1              # fresh start
-Resuming session 1 (crash recovery)  # picked up where it left off
+Started new session abc123def456xyz              # fresh start
+Resuming session abc123def456xyz (crash recovery)  # picked up where it left off
 ```
 
 ## Post-show: replay and audit
@@ -174,38 +227,78 @@ timestamp and a reason — this is the "why did seat-14 lose points in round
 3" answer machine.
 
 ```bash
-python scripts/replay.py --db data/blackbox-runner.db --list-sessions
-python scripts/replay.py --db data/blackbox-runner.db --timeline
-python scripts/replay.py --db data/blackbox-runner.db --player seat-14
-python scripts/replay.py --db data/blackbox-runner.db --at 1730000000   # state as of a unix timestamp
+python scripts/replay.py --list-sessions
+python scripts/replay.py --timeline
+python scripts/replay.py --player seat-14
+python scripts/replay.py --at 1730000000   # state as of a unix timestamp
 ```
 
-This is safe to run while the show is still live (SQLite WAL mode allows
-concurrent reads), so it also works as a rehearsal-night tuning tool — see
+(Connection settings come from `.env`'s `POCKETBASE_*` values; override
+with `--pb-url`/`--pb-email`/`--pb-password`.)
+
+This is safe to run while the show is still live (it only reads, and
+PocketBase serves concurrent HTTP reads as a matter of course), so it also
+works as a rehearsal-night tuning tool — see
 `docs/architecture.md` §7's note on the rehearsal telemetry feedback loop
 for `REBIND_MAX_DISTANCE` / `REBIND_MAX_GAP_S` / `ORPHAN_AFTER_S`.
 
-## Content freeze process
+## PocketBase persistence backend
 
-`content/show.yaml` can be edited and reloaded without restarting the
-server:
+Since issue #16 the game server keeps **all** runtime state — sessions,
+player bindings, binding-event audit trail, rounds, answers, scores, and
+the imported show content — in a PocketBase instance instead of a local
+SQLite file. Configuration (`.env`):
 
 ```bash
-curl -X POST http://localhost:8100/api/admin/content/reload
+POCKETBASE_URL=https://your-pocketbase-host
+POCKETBASE_ADMIN_EMAIL=...
+POCKETBASE_ADMIN_PASSWORD=...
 ```
 
-This re-validates the file (every answer option must reference a real
-TrackingBox zone — a typo is rejected, not silently accepted) and swaps it
-in. It's refused with a 409 if a round is currently in progress — reload
-between rounds only.
+Collections are created once with `python scripts/pocketbase_bootstrap.py`
+(idempotent; `--force` recreates, destroying records). Auth model: the
+Python server authenticates as a PocketBase **superuser** and keeps that
+token strictly server-side — it is never sent to any browser, and must
+never appear in a Docker build arg or committed file. Browsers get
+anonymous public **read** access to exactly two collections, `rounds` and
+`score_events` (for the player frontend's realtime subscriptions);
+`answers` (individual players' choices), `players`, `binding_events`, and
+content stay superuser-only.
 
-**Freeze content before doors open.** Live-reloading is for rehearsal
-iteration, not for changing the show while it's running:
+Known MVP gaps, accepted deliberately (future-facing work, not
+show-blocking — revisit before relying on this in a live show):
 
-1. Whoever owns the questions edits `content/show.yaml` directly — it's
-   plain YAML, no code required. See the existing rounds for the format
-   (`type: majority | minority | correct_zone`, `options` each with a
-   `zone` that must match a real TrackingBox zone id).
+* **Reveal replay can double-score.** Round phase transitions
+  (`closing` → `revealed` → `done`) are separate HTTP writes; recovery
+  after a crash *between* the last two treats the round as un-revealed,
+  and re-revealing re-inserts score events. This window existed with
+  SQLite too but is much wider over HTTP. Fix candidates: preserve the
+  real recovered state instead of collapsing to `closing`, or make score
+  events idempotent per (round, player).
+* **Content replace is not atomic.** `save_content` (import script and
+  admin editor both) deletes all rounds then re-creates them — PocketBase
+  has no cross-record transaction over REST. A crash mid-replace leaves a
+  partial show; the immediate re-count check makes this loud, not silent,
+  and re-running the import fixes it.
+* **Transient network errors.** Every write retries a few times inside
+  the client; a persistent PocketBase outage mid-show stalls writes and
+  surfaces as 500s on claims/round controls. The show cannot run without
+  its persistence backend — treat PocketBase reachability as show-critical
+  infrastructure, same tier as TrackingBox.
+
+## Content freeze process
+
+The server plays the show from its database; `content/show.yaml` is the
+git-tracked authoring copy. Content changes flow show.yaml → validate →
+import → reload:
+
+1. Whoever owns the questions edits `content/show.yaml` — directly (plain
+   YAML, no code required; see the existing rounds for the format:
+   `type: majority | minority | correct_zone | narration`, `options` each
+   with a `zone` that must match a real TrackingBox zone id). Simple
+   text/label/timing changes can instead be made live in the admin
+   dashboard's **Show editor** (they skip the import, but also aren't in
+   git — port keepers back into the YAML).
 2. Validate it against the venue's actual zone map before the show
    (requires TrackingBox already running with the venue's zone config):
    ```bash
@@ -214,7 +307,23 @@ iteration, not for changing the show while it's running:
    #     [majority     ] r1: 'Coffee or tea?' -> answer_a (Coffee), answer_b (Tea)
    #     ...
    ```
-3. Once the show starts, don't edit content further unless you have a
-   specific, tested reason and you do it between rounds — reordering or
-   removing rounds mid-show can shift what "round 3" means for anyone
-   relying on the recovered index after a restart.
+3. Import it into the game database (validates again; writes nothing if
+   invalid — add `--dry-run` to only check):
+   ```bash
+   python scripts/import_content.py   # defaults: content/show.yaml -> the PocketBase in .env
+   ```
+4. If the server is already running, apply it without a restart:
+   ```bash
+   curl -X POST http://localhost:8100/api/admin/content/reload
+   ```
+   This re-validates the imported rounds (every "choice" answer option must
+   reference a real TrackingBox zone — a typo is rejected, not silently
+   accepted) and swaps them in. It's refused with a 409 if a round is
+   currently in progress — reload between rounds only.
+
+**Freeze content before doors open.** Import/reload is for rehearsal
+iteration, not for changing the show while it's running. Once the show
+starts, don't touch content unless you have a specific, tested reason and
+you do it between rounds — reordering or removing rounds mid-show can
+shift what "round 3" means for anyone relying on the recovered index
+after a restart.

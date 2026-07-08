@@ -171,10 +171,8 @@ class TrackingClient:
         if isinstance(msg, dict) and msg.get("type") == "snapshot":
             self._apply_snapshot(msg.get("data") or {})
         elif isinstance(msg, dict) and msg.get("type") == "update":
-            # Rate-limited mode (ws_max_rate_hz > 0, TrackingBox's default)
-            # coalesces change events into one batched message per tick.
             for person in msg.get("people") or []:
-                if isinstance(person, dict) and "gid" in person:
+                if isinstance(person, dict):
                     self._apply_change(person)
         elif isinstance(msg, dict) and "gid" in msg:
             self._apply_change(msg)
