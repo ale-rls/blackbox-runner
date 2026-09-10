@@ -75,6 +75,7 @@ class GameEngine:
         tracking: TrackingClient,
         *,
         zone_count_interval_s: float = 1.0,
+        audio_delivery=None,
     ) -> None:
         self._db = db
         self.session_id = session_id
@@ -82,6 +83,7 @@ class GameEngine:
         self._bindings = bindings
         self._tracking = tracking
         self._zone_count_interval_s = zone_count_interval_s
+        self._audio_delivery = audio_delivery
         self._index = -1
         self._current: Optional[RoundRuntime] = None
         self._listeners: list[asyncio.Queue] = []
@@ -251,6 +253,26 @@ class GameEngine:
         await self._db.update_round_state(
             row_id, RoundState.ACTIVE.value, rt.opened_at, None, self.round_payload(rt)
         )
+
+        # Every audience member owns a continuous stream. Injecting the cue
+        # server-side means the phone can be locked and JavaScript can be
+        # suspended; the native media connection keeps pulling audio.
+        if self._audio_delivery is not None and content.audio:
+            players = [
+                player.id
+                for player in self._bindings.all_players()
+                if player.state == PlayerState.BOUND
+            ]
+            results = await self._audio_delivery.play_many(
+                players, content.audio, mode="interrupt"
+            )
+            failures = {pid: err for pid, err in results.items() if err}
+            if failures:
+                log.warning(
+                    "Personal audio degraded for %d/%d player(s); phone cue-file fallback remains active",
+                    len(failures),
+                    len(results),
+                )
 
         self._publish(EngineEvent("round_opened", self.round_payload(rt)))
         self._cancel_timer()

@@ -127,6 +127,25 @@ edit you want the server to pick up.
 
 Run tests with `make test`.
 
+### Personal audio streams
+
+Set `AUDIO_BRIDGE_URL`, `AUDIO_BRIDGE_TOKEN`, and `AUDIO_PUBLIC_URL` to enable
+the companion `blackbox-icecast` service. Every claimed player is allocated a
+continuous Icecast stream; opening a round injects that round's mp3 into each
+bound player's stream. If the bridge is disabled or unavailable, the existing
+browser-triggered mp3 path remains the degraded fallback.
+
+The bridge may run remotely on Coolify: the runner uploads the local MP3 over
+the authenticated API before issuing play commands, so TrackingBox and this
+runner can stay private on the venue network. See the companion
+`blackbox-icecast/COOLIFY.md` deployment guide.
+
+The operator dashboard also has a **Live personal audio** panel. Type an
+announcement, optionally select player ids and a voice, then click **Generate &
+play**. The runner calls ElevenLabs server-side, writes the resulting mp3 into
+the shared audio directory, and injects it immediately—no visit to the
+ElevenLabs site is needed.
+
 ### Player frontend (SvelteKit)
 
 The player app lives in `frontend/player/` (SvelteKit, static SPA build).

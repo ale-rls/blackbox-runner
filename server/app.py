@@ -13,16 +13,19 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
+import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import content_db, show_store, tts
+from .audio_bridge import AudioBridgeClient
 from .bindings import BindingError, BindingManager, PlayerState
 from .config import Settings
 from .content import ContentError, ShowContent
@@ -200,6 +203,34 @@ async def _consume_claim_requests(db: PocketBaseClient, bindings: BindingManager
             await asyncio.sleep(1.0)
 
 
+async def _sync_audio_players(bindings: BindingManager, audio: AudioBridgeClient) -> None:
+    """Keep active ids registered, including after a remote bridge restart."""
+    active_states = {PlayerState.BOUND, PlayerState.LOST, PlayerState.ORPHANED}
+    queue = bindings.subscribe()
+
+    async def sync(player) -> None:
+        try:
+            await audio.set_active(player.id, player.state in active_states)
+        except Exception as exc:
+            log.warning("Could not sync audio stream for %s: %s", player.id, exc)
+
+    async def reconcile() -> None:
+        await asyncio.gather(*(sync(player) for player in bindings.all_players()))
+
+    try:
+        await reconcile()
+        while True:
+            try:
+                player = await asyncio.wait_for(queue.get(), timeout=10.0)
+                await sync(player)
+            except asyncio.TimeoutError:
+                # The bridge registry is intentionally in-memory. Reconcile
+                # periodically so a Coolify restart heals without a new claim.
+                await reconcile()
+    finally:
+        bindings.unsubscribe(queue)
+
+
 class ClaimRequest(BaseModel):
     gid: int
     display_name: Optional[str] = None
@@ -223,6 +254,13 @@ class TTSRequest(BaseModel):
     voice_id: Optional[str] = None
 
 
+class LiveAudioRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+    player_ids: list[str] = Field(default_factory=list)
+    voice_id: Optional[str] = None
+    mode: Literal["interrupt", "queue"] = "interrupt"
+
+
 _EMPTY_SHOW = ShowContent(rounds=[])
 
 
@@ -244,6 +282,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.pocketbase_url,
         settings.pocketbase_admin_email,
         settings.pocketbase_admin_password,
+    )
+    audio = (
+        AudioBridgeClient(
+            settings.audio_bridge_url,
+            settings.audio_bridge_token,
+            settings.audio_dir,
+        )
+        if settings.audio_bridge_url
+        else None
     )
 
     @contextlib.asynccontextmanager
@@ -290,7 +337,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             log.warning("Could not load show content (%s); round control disabled", exc)
             show = _EMPTY_SHOW
         app.state.show = show
-        app.state.engine = await GameEngine.load(db, session_id, show, bindings, tracking)
+        app.state.engine = await GameEngine.load(
+            db,
+            session_id,
+            show,
+            bindings,
+            tracking,
+            audio_delivery=audio,
+        )
 
         bindings_task = asyncio.create_task(bindings.run())
         log_task = asyncio.create_task(_log_positions_periodically(tracking))
@@ -307,6 +361,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         zone_counts_task = asyncio.create_task(
             _publish_zone_counts(db, app.state.engine, session_id)
         )
+        audio_task = (
+            asyncio.create_task(_sync_audio_players(bindings, audio))
+            if audio is not None
+            else None
+        )
         try:
             yield
         finally:
@@ -315,12 +374,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             bindings.shutdown()
             for task in (
                 tracking_task, bindings_task, log_task, ritual_task, gids_task,
-                claim_task, zone_counts_task,
+                claim_task, zone_counts_task, audio_task,
             ):
+                if task is None:
+                    continue
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
             await db.close()
+            if audio is not None:
+                await audio.close()
 
     app = FastAPI(title="Blackbox Runner", version="0.1.0", lifespan=lifespan)
     # Permissive CORS so a standalone-deployed player frontend (SvelteKit
@@ -338,14 +401,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.session_id = None
     app.state.show = _EMPTY_SHOW
     app.state.engine = None
+    app.state.audio = audio
 
     @app.get("/health")
     async def health() -> dict:
-        return {
+        result = {
             "status": "ok",
             "tracking_connected": tracking.connected,
             "tracking_ws_url": settings.tracking_ws_url,
+            "personal_audio_configured": audio is not None,
         }
+        if audio is not None:
+            result["personal_audio"] = await audio.health()
+        return result
 
     @app.get("/api/tracking/audience")
     async def debug_audience() -> list[dict]:
@@ -608,6 +676,76 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "detail": detail,
         }
 
+    @app.get("/api/admin/audio/status")
+    async def audio_status() -> dict:
+        if audio is None:
+            return {"configured": False, "ok": False, "players": [], "flagged": []}
+        try:
+            status, health = await asyncio.gather(audio.status(), audio.health())
+            return {
+                "configured": True,
+                **status,
+                "ok": bool(health.get("ok")),
+                "health": health,
+            }
+        except Exception as exc:
+            return {
+                "configured": True,
+                "ok": False,
+                "error": str(exc),
+                "players": [],
+                "flagged": [],
+            }
+
+    @app.post("/api/admin/audio/tts-play")
+    async def generate_and_play_live_audio(body: LiveAudioRequest) -> dict:
+        """Generate an ad-hoc announcement and inject it into personal streams."""
+        if audio is None:
+            raise HTTPException(503, "personal audio is not configured — set AUDIO_BRIDGE_URL")
+        if not settings.elevenlabs_api_key:
+            raise HTTPException(503, "ElevenLabs is not configured — set ELEVENLABS_API_KEY")
+        text = body.text.strip()
+        if not text:
+            raise HTTPException(400, "text must not be empty")
+        voice_id = body.voice_id or settings.elevenlabs_voice_id
+        if not voice_id:
+            raise HTTPException(400, "no voice selected — set ELEVENLABS_VOICE_ID or pass voice_id")
+
+        players = app.state.bindings.all_players()
+        known = {player.id for player in players}
+        active_states = {PlayerState.BOUND, PlayerState.LOST, PlayerState.ORPHANED}
+        active = sorted(player.id for player in players if player.state in active_states)
+        targets = list(dict.fromkeys(body.player_ids)) if body.player_ids else active
+        unknown = [player_id for player_id in targets if player_id not in known]
+        if unknown:
+            raise HTTPException(400, f"unknown player id(s): {', '.join(unknown)}")
+        if not targets:
+            raise HTTPException(400, "there are no players to receive this audio")
+
+        try:
+            audio_bytes = await tts.synthesize(
+                text,
+                api_key=settings.elevenlabs_api_key,
+                voice_id=voice_id,
+                model_id=settings.elevenlabs_model_id,
+            )
+        except tts.TTSError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        safe_prefix = re.sub(r"[^A-Za-z0-9_-]+", "-", text[:32]).strip("-") or "message"
+        filename = f"live-{safe_prefix}-{uuid.uuid4().hex[:8]}.mp3"
+        await asyncio.to_thread((Path(settings.audio_dir) / filename).write_bytes, audio_bytes)
+        results = await audio.play_many(targets, filename, body.mode)
+        failures = {pid: error for pid, error in results.items() if error}
+        return {
+            "ok": not failures,
+            "audio": filename,
+            "bytes": len(audio_bytes),
+            "targets": targets,
+            "delivered": [pid for pid, error in results.items() if error is None],
+            "failures": failures,
+        }
+
     @app.post("/api/admin/rounds/start")
     async def start_round(body: Optional[StartRoundRequest] = None) -> dict:
         try:
@@ -707,7 +845,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """Runtime config the browser needs — currently just where the
         player frontend's PocketBase realtime subscriptions should point.
         Public values only; never credentials."""
-        return {"pocketbase_url": settings.pocketbase_url}
+        return {
+            "pocketbase_url": settings.pocketbase_url,
+            "audio_stream_base": settings.audio_public_url,
+        }
 
     # The SvelteKit build (frontend/player, issue #17) is a pure SPA:
     # every route serves the same fallback index.html and resolves

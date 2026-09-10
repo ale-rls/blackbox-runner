@@ -48,6 +48,12 @@ class Settings:
     pocketbase_admin_password: Optional[str] = None
     content_path: str = "content/show.yaml"
     audio_dir: str = "content/audio"
+    # Optional continuous personal-audio service. AUDIO_BRIDGE_URL is the
+    # server-to-server address; AUDIO_PUBLIC_URL is the browser-reachable
+    # bridge base used for /stream/{player_id} (often a venue LAN hostname).
+    audio_bridge_url: Optional[str] = None
+    audio_bridge_token: str = ""
+    audio_public_url: Optional[str] = None
     rebind_max_distance: float = 0.15
     rebind_max_gap_s: float = 8.0
     orphan_after_s: float = 3.0
@@ -94,6 +100,9 @@ class Settings:
             ),
             content_path=environ.get("GAME_CONTENT_PATH", cls.content_path),
             audio_dir=environ.get("GAME_AUDIO_DIR", cls.audio_dir),
+            audio_bridge_url=environ.get("AUDIO_BRIDGE_URL") or None,
+            audio_bridge_token=environ.get("AUDIO_BRIDGE_TOKEN", ""),
+            audio_public_url=environ.get("AUDIO_PUBLIC_URL") or None,
             rebind_max_distance=float(
                 environ.get("REBIND_MAX_DISTANCE", cls.rebind_max_distance)
             ),

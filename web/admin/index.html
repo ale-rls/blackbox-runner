@@ -65,17 +65,19 @@
         "board map"
         "board scores"
         "cues  scores"
+        "audio audio"
         "editor editor";
       align-items: start;
     }
     @media (max-width: 60rem) {
-      main { grid-template-columns: 1fr; grid-template-areas: "round" "map" "board" "scores" "cues" "editor"; }
+      main { grid-template-columns: 1fr; grid-template-areas: "round" "map" "board" "scores" "cues" "audio" "editor"; }
     }
     #card-round { grid-area: round; }
     #card-board { grid-area: board; }
     #card-map { grid-area: map; }
     #card-scores { grid-area: scores; }
     #card-cues { grid-area: cues; }
+    #card-audio { grid-area: audio; }
     #card-editor { grid-area: editor; }
 
     .card {
@@ -193,6 +195,15 @@
     .cue-log .type { color: var(--accent); flex-shrink: 0; }
     .cue-log .body { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+    /* Personal audio */
+    .audio-console { display: grid; grid-template-columns: minmax(15rem, 2fr) minmax(12rem, 1fr); gap: 0.7rem; }
+    .audio-console textarea { min-height: 6rem; }
+    .audio-options { display: grid; gap: 0.55rem; align-content: start; }
+    .audio-options input, .audio-options select { width: 100%; }
+    .audio-status { color: var(--muted); font-size: 0.8rem; }
+    .audio-status .bad { color: var(--red); }
+    @media (max-width: 45rem) { .audio-console { grid-template-columns: 1fr; } }
+
     /* Show editor */
     .tag {
       display: inline-block; padding: 0.15em 0.6em; border-radius: 999px;
@@ -245,6 +256,7 @@
       <span class="pill down" id="pill-tracking">tracking</span>
       <span class="pill down" id="pill-admin">admin ws</span>
       <span class="pill down" id="pill-td">cue ws</span>
+      <span class="pill down" id="pill-audio">personal audio</span>
     </div>
   </header>
 
@@ -309,6 +321,25 @@
         <button class="primary" id="btn-cue">Fire</button>
       </div>
       <div class="cue-log" id="cue-log"></div>
+    </section>
+
+    <section class="card" id="card-audio">
+      <div class="card-head">
+        <h2>Live personal audio</h2>
+        <div class="aux audio-status" id="audio-status">checking…</div>
+      </div>
+      <div class="audio-console">
+        <textarea id="live-audio-text" placeholder="Type an announcement. It will be generated with ElevenLabs and injected into the selected personal streams."></textarea>
+        <div class="audio-options">
+          <input id="live-audio-targets" placeholder="player ids, comma-separated (blank = everyone)" />
+          <select id="live-audio-mode">
+            <option value="interrupt">Interrupt current audio</option>
+            <option value="queue">Queue after current audio</option>
+          </select>
+          <input id="live-audio-voice" placeholder="voice id override (optional)" />
+          <button class="primary" id="btn-live-audio">Generate &amp; play</button>
+        </div>
+      </div>
     </section>
 
     <section class="card" id="card-editor">
@@ -778,6 +809,63 @@
         toast(`Cue fired: ${cueType}`);
       } catch (err) {
         toast(err.message, true);
+      }
+    });
+
+    // ---------------------------------------------------------------- //
+    // Personal audio — ad-hoc TTS and delivery health. The API key stays
+    // server-side; the operator never has to open ElevenLabs manually.
+    // ---------------------------------------------------------------- //
+    async function refreshAudioStatus() {
+      try {
+        const resp = await fetch("/api/admin/audio/status");
+        const status = resp.ok ? await resp.json() : { configured: false };
+        const ok = !!(status.configured && status.ok);
+        setPill("pill-audio", ok, ok ? "personal audio" : "personal audio down");
+        if (!status.configured) {
+          $("audio-status").innerHTML = '<span class="bad">not configured</span>';
+          return;
+        }
+        if (status.error) {
+          $("audio-status").innerHTML = `<span class="bad">${esc(status.error)}</span>`;
+          return;
+        }
+        const cap = status.capacity || {};
+        const flagged = status.flagged || [];
+        $("audio-status").innerHTML = `${cap.assigned ?? 0}/${cap.total ?? "?"} streams assigned` +
+          (flagged.length ? ` · <span class="bad">not receiving: ${esc(flagged.join(", "))}</span>` : "");
+      } catch (err) {
+        setPill("pill-audio", false, "personal audio down");
+        $("audio-status").innerHTML = '<span class="bad">bridge unreachable</span>';
+      }
+    }
+
+    $("btn-live-audio").addEventListener("click", async () => {
+      const text = $("live-audio-text").value.trim();
+      if (!text) { toast("Type something to say", true); return; }
+      const playerIds = $("live-audio-targets").value
+        .split(",").map((value) => value.trim()).filter(Boolean);
+      const btn = $("btn-live-audio");
+      btn.disabled = true;
+      btn.textContent = "Generating…";
+      try {
+        const result = await post("/api/admin/audio/tts-play", {
+          text,
+          player_ids: playerIds,
+          voice_id: $("live-audio-voice").value.trim() || null,
+          mode: $("live-audio-mode").value,
+        });
+        if (!result.ok) {
+          throw new Error(`delivery failed for: ${Object.keys(result.failures).join(", ")}`);
+        }
+        toast(`Generated and sent to ${result.delivered.length} player(s)`);
+        $("live-audio-text").value = "";
+        refreshAudioStatus();
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Generate & play";
       }
     });
 
@@ -1388,6 +1476,7 @@
     refreshRound();
     refreshScores();
     refreshHealth();
+    refreshAudioStatus();
     refreshAudience();
     setInterval(() => {
       for (const id of rowEls.keys()) refreshSeenCell(id);
@@ -1397,6 +1486,7 @@
     setInterval(refreshRound, 2000);
     setInterval(refreshScores, 3000);
     setInterval(refreshHealth, 3000);
+    setInterval(refreshAudioStatus, 5000);
     setInterval(tickCountdown, 250);
   </script>
 </body>

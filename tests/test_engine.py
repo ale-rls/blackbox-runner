@@ -485,6 +485,35 @@ async def test_narration_round_payload_carries_text_and_audio(db, tracking):
 
 
 @pytest.mark.asyncio
+async def test_narration_is_injected_into_each_bound_personal_stream(db, tracking):
+    class FakeAudio:
+        def __init__(self):
+            self.calls = []
+
+        async def play_many(self, player_ids, file, mode="interrupt"):
+            ids = list(player_ids)
+            self.calls.append((ids, file, mode))
+            return {player_id: None for player_id in ids}
+
+    session_id = await db.create_session()
+    bindings = await BindingManager.load(db, session_id, tracking)
+    await _claim_bound(bindings, tracking, "seat-a", 1, "a")
+    await _claim_bound(bindings, tracking, "seat-b", 2, "b")
+    delivery = FakeAudio()
+    engine = GameEngine(
+        db,
+        session_id,
+        ShowContent.model_validate(NARRATION_SHOW),
+        bindings,
+        tracking,
+        audio_delivery=delivery,
+    )
+
+    await engine.start_next_round()
+    assert delivery.calls == [(["seat-a", "seat-b"], "k2_intro.mp3", "interrupt")]
+
+
+@pytest.mark.asyncio
 async def test_narration_round_has_no_auto_close_timer(db, tracking):
     session_id = await db.create_session()
     bindings = await BindingManager.load(db, session_id, tracking)

@@ -357,6 +357,72 @@ async def test_tts_endpoint_generates_and_wires_audio(
 
 
 @pytest.mark.asyncio
+async def test_admin_can_generate_and_play_live_personal_audio(
+    fake_backend, fake_zones_http, fake_pocketbase, pb, tmp_path, monkeypatch
+):
+    import dataclasses
+
+    import server.app
+    import server.tts
+
+    class FakeAudioBridge:
+        instances = []
+
+        def __init__(self, url, token, audio_dir):
+            self.calls = []
+            self.instances.append(self)
+
+        async def set_active(self, player_id, active):
+            return {"player_id": player_id, "active": active}
+
+        async def play_many(self, player_ids, file, mode="interrupt"):
+            ids = list(player_ids)
+            self.calls.append((ids, file, mode))
+            return {player_id: None for player_id in ids}
+
+        async def status(self):
+            return {"players": [], "flagged": [], "capacity": {"total": 10, "assigned": 0, "available": 10}}
+
+        async def health(self):
+            return {"ok": True}
+
+        async def close(self):
+            pass
+
+    async def fake_synthesize(text, **kwargs):
+        return b"ID3live"
+
+    monkeypatch.setattr(server.app, "AudioBridgeClient", FakeAudioBridge)
+    monkeypatch.setattr(server.tts, "synthesize", fake_synthesize)
+    await _import_show(pb, _TEST_SHOW)
+    settings = dataclasses.replace(
+        _settings(fake_backend, fake_zones_http, fake_pocketbase, tmp_path),
+        audio_bridge_url="http://audio",
+        audio_bridge_token="secret",
+        elevenlabs_api_key="key",
+        elevenlabs_voice_id="voice",
+    )
+    app = create_app(settings)
+
+    async with LifespanManager(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            assert (await client.post("/api/players/seat-a/claim", json={"gid": 1})).status_code == 200
+            response = await client.post(
+                "/api/admin/audio/tts-play",
+                json={"text": "Please move to the light.", "player_ids": ["seat-a"]},
+            )
+            assert response.status_code == 200
+            body = response.json()
+            assert body["ok"] is True
+            assert body["delivered"] == ["seat-a"]
+            assert (tmp_path / "audio" / body["audio"]).read_bytes() == b"ID3live"
+            assert FakeAudioBridge.instances[0].calls == [
+                (["seat-a"], body["audio"], "interrupt")
+            ]
+
+
+@pytest.mark.asyncio
 async def test_player_page_served(fake_backend, fake_zones_http, fake_pocketbase, pb, tmp_path):
     await _import_show(pb, _TEST_SHOW)
     app = create_app(_settings(fake_backend, fake_zones_http, fake_pocketbase, tmp_path))

@@ -25,13 +25,18 @@ make sure `POCKETBASE_URL` / `POCKETBASE_ADMIN_EMAIL` /
 reachable, or the game server refuses to start (deliberately: there is no
 degraded mode without persistence).
 
-Start TrackingBox **first**, wait for it to be healthy, **then** start the
-game server. Starting them the other way round isn't harmful (the game
+Start the personal-audio stack and TrackingBox **first**, wait for both to be
+healthy, **then** start the game server. Starting them the other way round isn't harmful (the game
 server retries the connection), but it makes the first couple of minutes
 of logs confusing.
 
 ```bash
-# 1. TrackingBox, from its own checkout, with the venue's calibrated config
+# 1. Personal audio, from blackbox-icecast. Its AUDIO_DIR points at this
+# repo's content/audio directory.
+make up
+curl http://localhost:8300/health
+
+# 2. TrackingBox, from its own checkout, with the venue's calibrated config
 audience-tracker serve --config config.json --port 8000
 
 # check it's alive before moving on:
@@ -40,7 +45,7 @@ curl http://localhost:8000/health
 #   pipeline_running:false means tracking died while the API stayed up — see
 #   "TrackingBox is up but nobody is being tracked" below.
 
-# 2. Game server, from this repo
+# 3. Game server, from this repo
 make dev
 # or, equivalently, with any RITUAL_ZONE_ID / tuning overrides for the night:
 RITUAL_ZONE_ID=ritual make dev
@@ -107,6 +112,16 @@ Players unlock audio with their first tap (the claim button); anyone who
 reconnects without tapping gets a "Tippen, um den Ton zu starten" overlay
 the next time a step tries to speak.
 
+When personal audio is configured, that tap starts a continuous per-player
+stream. Round audio is injected by the server and therefore continues to work
+while the phone is locked. The cue-file behavior above remains the fallback if
+the personal stream fails.
+
+If the audio stack is on Coolify, use its public HTTPS URL for
+`AUDIO_BRIDGE_URL` and `AUDIO_PUBLIC_URL`. The runner uploads narration through
+the protected bridge endpoint before cueing it; do not expose TrackingBox or
+the runner to the public internet.
+
 ### Show editor and ElevenLabs voice generation
 
 The **Show editor** card at the bottom of the admin dashboard lists every
@@ -137,11 +152,18 @@ generation — handy for auditioning voices. Generation costs ElevenLabs
 credits and a long monologue takes tens of seconds; do this in prep, not
 mid-show.
 
+For an unscripted announcement during rehearsal or performance, use **Live
+personal audio** in the admin dashboard: type the text, leave targets blank for
+everyone or enter comma-separated player ids, choose interrupt/queue, and click
+**Generate & play**. This performs the ElevenLabs generation and stream
+injection in one action; the API key never reaches the browser.
+
 ## Health checks, anytime
 
 ```bash
 curl http://localhost:8000/health          # TrackingBox
 curl http://localhost:8100/health          # game server
+curl http://localhost:8300/health          # audio bridge + Liquidsoap + Icecast
 curl http://localhost:8100/api/rounds/current
 curl http://localhost:8100/api/scores
 ```
