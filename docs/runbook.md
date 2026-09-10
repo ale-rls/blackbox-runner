@@ -277,15 +277,22 @@ POCKETBASE_ADMIN_EMAIL=...
 POCKETBASE_ADMIN_PASSWORD=...
 ```
 
-Collections are created once with `python scripts/pocketbase_bootstrap.py`
-(idempotent; `--force` recreates, destroying records). Auth model: the
-Python server authenticates as a PocketBase **superuser** and keeps that
-token strictly server-side — it is never sent to any browser, and must
-never appear in a Docker build arg or committed file. Browsers get
-anonymous public **read** access to exactly two collections, `rounds` and
-`score_events` (for the player frontend's realtime subscriptions);
-`answers` (individual players' choices), `players`, `binding_events`, and
-content stay superuser-only.
+The production schema is defined by committed migrations under
+`pocketbase/pb_migrations/`. The pinned `pocketbase/Dockerfile` copies them into
+the image and PocketBase applies pending migrations automatically at startup.
+Deploy it with `docker-compose.pocketbase.yml` and follow
+`pocketbase/README.md`, including its backup-first procedure when adopting an
+existing database. `scripts/pocketbase_bootstrap.py` is a legacy local-only
+tool; do not use `--force` on production.
+
+Auth model: the Python server authenticates as a PocketBase **superuser** and
+keeps that token strictly server-side — it is never sent to any browser, and
+must never appear in a Docker build arg or committed file. Browsers get
+anonymous public **read** access to `rounds`, `score_events`, `players`,
+`game_state`, `player_reveals`, and `live_stats`. `claim_requests` additionally
+allows anonymous creates so phones can request a binding; the Runner validates
+and resolves those requests. `answers`, `binding_events`, sessions, and content
+stay superuser-only.
 
 Known MVP gaps, accepted deliberately (future-facing work, not
 show-blocking — revisit before relying on this in a live show):

@@ -79,6 +79,9 @@ scripts/
   validate_content.py  # check show.yaml against a running TrackingBox's zones
   import_content.py    # push show.yaml into the game DB (the live content)
   replay.py            # CLI for server/replay.py
+pocketbase/
+  Dockerfile           # pinned production PocketBase image
+  pb_migrations/       # committed schema migrations, applied on startup
 td_scripts/
   td_receive_cues.py   # TouchDesigner WebSocket DAT callback for /ws/td
 tests/
@@ -139,6 +142,12 @@ The bridge may run remotely on Coolify: the runner uploads the local MP3 over
 the authenticated API before issuing play commands, so TrackingBox and this
 runner can stay private on the venue network. See the companion
 `blackbox-icecast/COOLIFY.md` deployment guide.
+
+PocketBase can also run as a versioned Coolify service from this repository.
+Use [`docker-compose.pocketbase.yml`](docker-compose.pocketbase.yml); its pinned
+image applies the committed schema migrations under `pocketbase/pb_migrations/`
+on startup. Fresh-deployment and existing-database instructions are in
+[`pocketbase/README.md`](pocketbase/README.md).
 
 The operator dashboard also has a **Live personal audio** panel. Type an
 announcement, optionally select player ids and a voice, then click **Generate &

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Create the game's PocketBase collections (issue #16).
+"""Legacy helper for manually creating the game's PocketBase collections.
 
-Idempotent: collections that already exist are left untouched (pass
---force to delete and recreate them — destroys their records!). Run once
-against a fresh PocketBase instance before first boot:
+Production deployments use the committed ``pocketbase/pb_migrations`` schema
+and ``docker-compose.pocketbase.yml`` instead. This helper remains for older
+local setups. It is idempotent: collections that already exist are left
+untouched (``--force`` deletes their records and must never be used against a
+production database):
 
     python scripts/pocketbase_bootstrap.py
 

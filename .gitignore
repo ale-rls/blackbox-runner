@@ -16,3 +16,5 @@ node_modules/
 .svelte-kit/
 
 frontend/player/build
+pocketbase/bin/
+pocketbase/pb_data/
